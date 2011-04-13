@@ -1,0 +1,1 @@
+A Python API for Solr that supports non-blocking calls made through Tornado.
