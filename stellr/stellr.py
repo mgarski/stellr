@@ -28,19 +28,34 @@ except ImportError:
 
 class StellrError(Exception):
     """Error that will be thrown from stellr."""
-    pass
+    def __init__(self, url, message):
+        self.url = url
+        self.message = message
 
-class UpdateCommand(object):
-    def __init__(self, commit_within=None, commit=False):
-        self.commit_within = commit_within
-        self.commit = commit
+class BaseCommand(object):
+    def __init__(self, handler, content_type):
+        self.handler = handler.lstrip('/').rstrip('/')
+        self.content_type =  content_type
         self._commands = list()
+
+    def clear_command(self):
+        self._commands = list()
+
+class UpdateCommand(BaseCommand):
+    def __init__(self, commit_within=None,
+                 commit=False, handler='/update/json'):
+        BaseCommand.__init__(self, handler, 'application/json; charset=utf-8')
+        self.commit_within = commit_within
+        self.handler += '?wt=json'
+        if commit:
+            self.handler += '&commit=true'
+        self.content_type = ''
 
     @property
     def data(self):
         return json.dumps(self._commands)
 
-    def update(self, data):
+    def add_update(self, data):
         # check if data is an iterable or dictionary or object
         if type(data) is dict:
             self._append_update(data)
@@ -58,7 +73,7 @@ class UpdateCommand(object):
             cmd['commitWithin'] = self.commit_within
         self._commands.append(cmd)
 
-    def delete_by_id(self, data):
+    def add_delete_by_id(self, data):
         # check if id is an iterable or value
         if isinstance(data, Iterable):
             for id in data:
@@ -69,7 +84,7 @@ class UpdateCommand(object):
     def _append_delete(self, id):
         self._commands.append({'delete': {'id': id}})
 
-    def delete_by_query(self, data):
+    def add_delete_by_query(self, data):
         # check if query is an iterable or value
         if isinstance(data, Iterable):
             for query in data:
@@ -80,44 +95,40 @@ class UpdateCommand(object):
     def _append_delete_query(self, query):
         self._commands.append({'delete': {'query': query}})
 
-    def commit(self):
+    def add_commit(self):
         self._commands.append({'commit': {}})
 
-    def optimize(self, wait_flush=False, wait_searcher=False):
+    def add_optimize(self, wait_flush=False, wait_searcher=False):
         self._commands.append({'optimize':
                                 {'waitFlush':wait_flush,
                                  'waitSearcher':wait_searcher }})
 
-class QueryCommand(object):
+class QueryCommand(BaseCommand):
     def __init__(self, handler='/solr/select'):
-        self.handler = handler
-        self._params = list()
+        BaseCommand.__init__(self, handler,
+                             'application/x-www-form-urlencoded; \
+                             charset=utf-8')
 
     def add_param(self, name, value):
-        self._params.append((name, value))
+        self._commands.append((name, value))
 
     @property
-    def query(self):
+    def data(self):
         params = map(
                 lambda x: '{0}={1}'.format(x[0], urllib.quote_plus(x[1])),
-                     self._params)
+                     self._commands)
         return '&'.join(params)
 
 class BaseConnection(object):
-    def __init__(self, url, user=None, password=None):
-        self.url = url
-        self.user = user
-        self.password = password
-
-    def execute_update(self, command):
-        pass
-
-    def execute_query(self, command):
-        pass
+    def __init__(self, url, user=None, password=None, timeout=30000):
+        self._url = url.rstrip('/') + '/'
+        self._user = user
+        self._password = password
+        self._timeout = timeout
 
     def __str__(self):
         return 'host={0}, user={1}, password={2}'\
-            .format(self.url, self.user, self.password)
+                .format(self._url, self._user, self._password)
 
 class BlockingConnection(BaseConnection):
     def __init__(self, url, user=None, password=None):
@@ -126,23 +137,40 @@ class BlockingConnection(BaseConnection):
                                    connections')
         BaseConnection.__init__(self, url, user, password)
 
-    def execute_update(self, command):
-        pass
-
-    def execute_query(self, command):
-        pass
+    def execute(self, command):
+        h = httplib2.Http(timeout=self._timeout)
+        if self._user and self._password:
+            h.add_credentials(self._user, self._password)
+        try:
+            url = self._url + command.handler
+            body = command.data.encode('UTF-8')
+            resp, content = h.request(url, 'POST', body=body,
+                    headers={'content-type': command.content_type})
+            if resp.status != 200:
+                raise StellrError(url, 'HTTP {0} from Solr: {1}'
+                                        .format(resp.status, content))
+            return json.loads(content)
+        except httplib2.HttpLib2Error as e:
+            raise StellrError(url, str(e.__class__) + ' caught calling Solr.')
+        except BaseException as e:
+            if type(e) == StellrError:
+                raise
+            else:
+                raise StellrError(url,
+                        str(e.__class__) + ' caught when parsing json.')
 
 class TornadoConnection(BaseConnection):
-    def __init__(self, url, user=None, password=None):
+    def __init__(self, url, user=None, password=None, max_clients=10):
         if not tornado:
             raise StellrError('tornado.httpclient is required \
                                    for non-blocking connections')
         BaseConnection.__init__(self, url, user, password)
+        self._max_clients = max_clients
 
-    def execute_update(self, command):
+    def execute_update(self, command, callback):
         pass
 
-    def execute_query(self, command):
+    def execute_query(self, command, callback):
         pass
 
 
@@ -150,31 +178,65 @@ class MockObj(object):
     pass
 
 if __name__ == "__main__":
+#    try:
+#        test = BlockingConnection('test')
+#        print(test)
+#    except StellrError:
+#        print("BlockingConnection failed")
+#
+#
+#    try:
+#        test = TornadoConnection("test", "u", "p")
+#        print(test)
+#    except StellrError:
+#        print("TornadoConnection failed")
+#
+#    q = QueryCommand()
+#    q.add_param('q', 'test')
+#    q.add_param('qf', 'one,two')
+#    print(q._commands)
+#    print(q.data)
+#
+#    a = UpdateCommand(commit_within=1000)
+#    a.add_update([{'d': 'val1', 'e': 2},{'d': 'val2', 'e':[1,2,'3']}])
+#    print(a.data)
+#
+#    m = MockObj()
+#    m.a = '123'
+#    m.b = [1, 2, 3]
+#    a.add_update(m)
+#    print(a.data)
+#
+#    conn = BlockingConnection('http://localhost:8983')
+#    query = QueryCommand(handler='/solr/topic/select')
+#    query.add_param('q', 'a')
+#    try:
+#        print(conn.execute(query))
+#    except StellrError as e:
+#        print(e.url + '\n')
+#        print(e.message)
+
+    conn = BlockingConnection('http://localhost:8983',
+                              user='admin', password='n0access')
+    update = UpdateCommand(handler='/solr/topic/update/json',
+                           commit=True)
+    update.add_update({'id': 'mikey', 'topicname': 'mikey', 'topicuri':'/mikey', 'topictype':'mikey'})
+
     try:
-        test = BlockingConnection('test')
-        print(test)
-    except StellrError:
-        print("BlockingConnection failed")
+        conn.execute(update)
+    except StellrError as e:
+        print e.url
+        print(e.message)
 
-
+    query = QueryCommand(handler='/solr/topic/select')
+    query.add_param('q', 'id:mikey')
     try:
-        test = TornadoConnection("test", "u", "p")
-        print(test)
-    except StellrError:
-        print("TornadoConnection failed")
+        print(conn.execute(query))
+    except StellrError as e:
+        print(e.url + '\n')
+        print(e.message)
 
-    q = QueryCommand()
-    q.add_param('q', 'test')
-    q.add_param('qf', 'one,two')
-    print(q._params)
-    print(q.query)
 
-    a = UpdateCommand(commit_within=1000)
-    a.update([{'d': 'val1', 'e': 2},{'d': 'val2', 'e':[1,2,'3']}])
-    print a.data
 
-    m = MockObj()
-    m.a = '123'
-    m.b = [1, 2, 3]
-    a.update(m)
-    print a.data
+
+
