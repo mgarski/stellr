@@ -22,15 +22,21 @@ except ImportError:
     httplib2 = None
 
 try:
-    import tornado.httpclient as tornado
+    import tornado.httpclient as tornadolib
 except ImportError:
-    tornado = None
+    tornadolib = None
 
 class StellrError(Exception):
     """Error that will be thrown from stellr."""
-    def __init__(self, url, message):
-        self.url = url
+    def __init__(self, message, url=None, inner=None):
         self.message = message
+        self.url = url
+        self.inner = inner
+
+class StellrResponse(object):
+    def __init__(self, body=None, error=None):
+        self.body = body
+        self.error = error
 
 class BaseCommand(object):
     def __init__(self, handler, content_type):
@@ -56,7 +62,6 @@ class UpdateCommand(BaseCommand):
         return json.dumps(self._commands)
 
     def add_update(self, data):
-        # check if data is an iterable or dictionary or object
         if type(data) is dict:
             self._append_update(data)
         elif isinstance(data, Iterable):
@@ -74,26 +79,21 @@ class UpdateCommand(BaseCommand):
         self._commands.append(cmd)
 
     def add_delete_by_id(self, data):
-        # check if id is an iterable or value
         if isinstance(data, Iterable):
             for id in data:
-                self._append_delete(id)
+                self._append_delete('id', id)
         else:
-            self._append_delete(data)
-
-    def _append_delete(self, id):
-        self._commands.append({'delete': {'id': id}})
+            self._append_delete('id', data)
 
     def add_delete_by_query(self, data):
-        # check if query is an iterable or value
         if isinstance(data, Iterable):
             for query in data:
-                self._append_delete_query(query)
+                self._append_delete('query', query)
         else:
-            self._append_delete_query(data)
+            self._append_delete('query', data)
 
-    def _append_delete_query(self, query):
-        self._commands.append({'delete': {'query': query}})
+    def _append_delete(self, delete_type, data):
+        self._commands.append({'delete': {delete_type: data}})
 
     def add_commit(self):
         self._commands.append({'commit': {}})
@@ -115,7 +115,7 @@ class QueryCommand(BaseCommand):
     @property
     def data(self):
         params = map(
-                lambda x: '{0}={1}'.format(x[0], urllib.quote_plus(x[1])),
+                lambda (k, v): '%s=%s' % (k, urllib.quote_plus(v)),
                      self._commands)
         return '&'.join(params)
 
@@ -127,14 +127,14 @@ class BaseConnection(object):
         self._timeout = timeout
 
     def __str__(self):
-        return 'host={0}, user={1}, password={2}'\
-                .format(self._url, self._user, self._password)
+        return 'host=%s, user=%s, password=%s' % \
+               (self._url, self._user, self._password)
 
 class BlockingConnection(BaseConnection):
     def __init__(self, url, user=None, password=None):
         if not httplib2:
             raise StellrError('httplib2 is required for blocking \
-                                   connections')
+                                connections')
         BaseConnection.__init__(self, url, user, password)
 
     def execute(self, command):
@@ -147,31 +147,48 @@ class BlockingConnection(BaseConnection):
             resp, content = h.request(url, 'POST', body=body,
                     headers={'content-type': command.content_type})
             if resp.status != 200:
-                raise StellrError(url, 'HTTP {0} from Solr: {1}'
-                                        .format(resp.status, content))
+                raise StellrError(
+                        'HTTP %d from Solr' % resp.status, url)
             return json.loads(content)
-        except httplib2.HttpLib2Error as e:
-            raise StellrError(url, str(e.__class__) + ' caught calling Solr.')
-        except BaseException as e:
-            if type(e) == StellrError:
-                raise
-            else:
-                raise StellrError(url,
-                        str(e.__class__) + ' caught when parsing json.')
+        except StellrError:
+            raise
+        except Exception as e:
+            raise StellrError(
+                    '%s caught when parsing JSON.' % e.__class__, url, e)
 
 class TornadoConnection(BaseConnection):
     def __init__(self, url, user=None, password=None, max_clients=10):
-        if not tornado:
-            raise StellrError('tornado.httpclient is required \
+        if not tornadolib:
+            raise StellrError(None, 'tornado.httpclient is required \
                                    for non-blocking connections')
         BaseConnection.__init__(self, url, user, password)
         self._max_clients = max_clients
 
-    def execute_update(self, command, callback):
-        pass
+    def execute(self, command, callback):
+        self._callback = callback
+        self._called_url = self._url + command.handler
+        body = command.data.encode('UTF-8')
+        request = tornadolib.HTTPRequest(self._called_url, method='POST',
+                body=body, headers={'content-type': command.content_type},
+                auth_username=self._user, auth_password=self._password,
+                request_timeout=self._timeout)
+        h = tornadolib.AsyncHTTPClient(max_clients=self._max_clients)
+        h.fetch(request, self._receive_solr)
 
-    def execute_query(self, command, callback):
-        pass
+    def _receive_solr(self, response):
+        stellr_response = StellrResponse()
+        if response.error:
+            stellr_response.error = StellrError(
+                    response.error, url=self._called_url)
+        else:
+            try:
+                stellr_response.body = json.loads(response.body)
+            except:
+                stellr_response.error = StellrError(
+                    'Response body could not be parsed', url=self._called_url)
+                stellr_response.body = response.body
+        self._callback(stellr_response)
+
 
 
 class MockObj(object):
@@ -215,28 +232,61 @@ if __name__ == "__main__":
 #    except StellrError as e:
 #        print(e.url + '\n')
 #        print(e.message)
+#
+#    conn = BlockingConnection('http://localhost:8983',
+#                              user='update', password='update!')
+#    update = UpdateCommand(handler='/solr/topic/update/json',
+#                           commit=True)
+#    update.add_update({'id': 'mikey', 'topicname': 'mikey', 'topicuri':'/mikey', 'topictype':'mikey'})
+#    m = MockObj()
+#    m.id = 'lynda'
+#    m.topicname = 'lynda'
+#    m.topicuri = '/lynda'
+#    m.topictype = 'lynda'
+#    update.add_update(m)
+#
+#    try:
+#        conn.execute(update)
+#    except StellrError as e:
+#        print(e.url)
+#        print(e.message)
+#
+#    query = QueryCommand(handler='/solr/topic/select')
+#    query.add_param('q', 'id:mikey id:lynda')
+#    try:
+#        print(conn.execute(query))
+#    except StellrError as e:
+#        print(e.url + '\n')
+#        print(e.message)
 
-    conn = BlockingConnection('http://localhost:8983',
-                              user='admin', password='n0access')
-    update = UpdateCommand(handler='/solr/topic/update/json',
-                           commit=True)
-    update.add_update({'id': 'mikey', 'topicname': 'mikey', 'topicuri':'/mikey', 'topictype':'mikey'})
+    import tornado.ioloop
 
-    try:
-        conn.execute(update)
-    except StellrError as e:
-        print e.url
-        print(e.message)
+    def handle_request(response):
+        if response.error:
+            print "Error:", response.error
+        else:
+            print response.body
+        tornado.ioloop.IOLoop.instance().stop()
 
+    conn = TornadoConnection('http://localhost:8983')
     query = QueryCommand(handler='/solr/topic/select')
-    query.add_param('q', 'id:mikey')
-    try:
-        print(conn.execute(query))
-    except StellrError as e:
-        print(e.url + '\n')
-        print(e.message)
+    query.add_param('q', 'id:mikey id:lynda')
+    conn.execute(query, handle_request)
+    tornado.ioloop.IOLoop.instance().start()
 
 
-
+#   Test:
+#       [x] add with dictionary
+#       [ ] add with list of dictionaries
+#       [x] add with object
+#       [x] mixed add
+#       [ ] add with list of objects
+#       [ ] delete by id
+#       [ ] delete by list of ids
+#       [ ] delete by query
+#       [ ] delete by list of queries
+#       [ ] commit
+#       [ ] optimize
+#       [x] queries
 
 
