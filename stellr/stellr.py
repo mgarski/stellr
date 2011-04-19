@@ -1,4 +1,4 @@
-#   Copyright 2011 Michael Garski
+#   Copyright 2011 Michael Garski (mgarski@mac.com)
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -12,14 +12,13 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+from collections import Iterable
+import httplib
 import json
 import urllib
-from collections import Iterable
+import urllib2
 
-try:
-    import httplib2
-except ImportError:
-    httplib2 = None
+DEFAULT_TIMEOUT = 30
 
 try:
     import tornado.httpclient as tornadolib
@@ -28,10 +27,13 @@ except ImportError:
 
 class StellrError(Exception):
     """Error that will be thrown from stellr."""
-    def __init__(self, message, url=None, inner=None):
+    def __init__(self, message, url=None, timeout=False):
         self.message = message
         self.url = url
-        self.inner = inner
+        self.timeout = timeout
+
+    def __str__(self):
+        return self.message
 
 class StellrResponse(object):
     def __init__(self, body=None, error=None):
@@ -114,13 +116,11 @@ class QueryCommand(BaseCommand):
 
     @property
     def data(self):
-        params = map(
-                lambda (k, v): '%s=%s' % (k, urllib.quote_plus(v)),
-                     self._commands)
-        return '&'.join(params)
+        return urllib.urlencode(self._commands)
 
 class BaseConnection(object):
-    def __init__(self, url, user=None, password=None, timeout=30000):
+    def __init__(self, url, user=None, password=None,
+                 timeout=DEFAULT_TIMEOUT):
         self._url = url.rstrip('/') + '/'
         self._user = user
         self._password = password
@@ -130,38 +130,46 @@ class BaseConnection(object):
         return 'host=%s, user=%s, password=%s' % \
                (self._url, self._user, self._password)
 
+    def _build_err_msg(self, http_code):
+        return 'HTTP %s: %s' % (http_code, httplib.responses[http_code])
+
 class BlockingConnection(BaseConnection):
-    def __init__(self, url, user=None, password=None):
-        if not httplib2:
-            raise StellrError('httplib2 is required for blocking \
-                                connections')
-        BaseConnection.__init__(self, url, user, password)
+    def __init__(self, url, user=None, password=None,
+                 timeout=DEFAULT_TIMEOUT):
+        BaseConnection.__init__(self, url, user, password, timeout)
 
     def execute(self, command):
-        h = httplib2.Http(timeout=self._timeout)
+        url = self._url + command.handler
         if self._user and self._password:
-            h.add_credentials(self._user, self._password)
+            handler = urllib2.HTTPBasicAuthHandler()
+            handler.add_password(realm='Solr Realm', uri=url,
+                                 user=self._user, passwd=self._password)
+        else:
+            handler = urllib2.HTTPHandler()
+
+        opener = urllib2.build_opener(handler)
+        opener.addheaders = [('content-type', command.content_type)]
+
         try:
-            url = self._url + command.handler
-            body = command.data.encode('UTF-8')
-            resp, content = h.request(url, 'POST', body=body,
-                    headers={'content-type': command.content_type})
-            if resp.status != 200:
-                raise StellrError(
-                        'HTTP %d from Solr' % resp.status, url)
-            return json.loads(content)
-        except StellrError:
-            raise
+            content = opener.open(url, command.data.encode('UTF-8'),
+                                  timeout=self._timeout)
+            return json.load(content)
+        except urllib2.HTTPError as e:
+            raise StellrError(self._build_err_msg(e.code), url)
+        except urllib2.URLError as e:
+            timeout = str(e.reason).lower().find('timed out') >= 0
+            raise StellrError(e.reason, url, timeout=timeout)
         except Exception as e:
-            raise StellrError(
-                    '%s caught when parsing JSON.' % e.__class__, url, e)
+            raise StellrError(e, url)
+
 
 class TornadoConnection(BaseConnection):
-    def __init__(self, url, user=None, password=None, max_clients=10):
+    def __init__(self, url, user=None, password=None,
+                 max_clients=10, timeout=DEFAULT_TIMEOUT):
         if not tornadolib:
             raise StellrError(None, 'tornado.httpclient is required \
                                    for non-blocking connections')
-        BaseConnection.__init__(self, url, user, password)
+        BaseConnection.__init__(self, url, user, password, timeout)
         self._max_clients = max_clients
 
     def execute(self, command, callback):
@@ -178,115 +186,16 @@ class TornadoConnection(BaseConnection):
     def _receive_solr(self, response):
         stellr_response = StellrResponse()
         if response.error:
-            stellr_response.error = StellrError(
-                    response.error, url=self._called_url)
+            stellr_response.body = response.body
+            stellr_response.error = StellrError(response.error,
+                                                url=self._called_url)
         else:
+            # TODO: ensure error messages formatted same as for blocking
             try:
                 stellr_response.body = json.loads(response.body)
-            except:
-                stellr_response.error = StellrError(
-                    'Response body could not be parsed', url=self._called_url)
+            except Exception as e:
                 stellr_response.body = response.body
+                stellr_response.error = StellrError(
+                    'Response body could not be parsed: %s' % e,
+                    url=self._called_url)
         self._callback(stellr_response)
-
-
-
-class MockObj(object):
-    pass
-
-if __name__ == "__main__":
-#    try:
-#        test = BlockingConnection('test')
-#        print(test)
-#    except StellrError:
-#        print("BlockingConnection failed")
-#
-#
-#    try:
-#        test = TornadoConnection("test", "u", "p")
-#        print(test)
-#    except StellrError:
-#        print("TornadoConnection failed")
-#
-#    q = QueryCommand()
-#    q.add_param('q', 'test')
-#    q.add_param('qf', 'one,two')
-#    print(q._commands)
-#    print(q.data)
-#
-#    a = UpdateCommand(commit_within=1000)
-#    a.add_update([{'d': 'val1', 'e': 2},{'d': 'val2', 'e':[1,2,'3']}])
-#    print(a.data)
-#
-#    m = MockObj()
-#    m.a = '123'
-#    m.b = [1, 2, 3]
-#    a.add_update(m)
-#    print(a.data)
-#
-#    conn = BlockingConnection('http://localhost:8983')
-#    query = QueryCommand(handler='/solr/topic/select')
-#    query.add_param('q', 'a')
-#    try:
-#        print(conn.execute(query))
-#    except StellrError as e:
-#        print(e.url + '\n')
-#        print(e.message)
-#
-#    conn = BlockingConnection('http://localhost:8983',
-#                              user='update', password='update!')
-#    update = UpdateCommand(handler='/solr/topic/update/json',
-#                           commit=True)
-#    update.add_update({'id': 'mikey', 'topicname': 'mikey', 'topicuri':'/mikey', 'topictype':'mikey'})
-#    m = MockObj()
-#    m.id = 'lynda'
-#    m.topicname = 'lynda'
-#    m.topicuri = '/lynda'
-#    m.topictype = 'lynda'
-#    update.add_update(m)
-#
-#    try:
-#        conn.execute(update)
-#    except StellrError as e:
-#        print(e.url)
-#        print(e.message)
-#
-#    query = QueryCommand(handler='/solr/topic/select')
-#    query.add_param('q', 'id:mikey id:lynda')
-#    try:
-#        print(conn.execute(query))
-#    except StellrError as e:
-#        print(e.url + '\n')
-#        print(e.message)
-
-    import tornado.ioloop
-
-    def handle_request(response):
-        if response.error:
-            print "Error:", response.error
-        else:
-            print response.body
-        tornado.ioloop.IOLoop.instance().stop()
-
-    conn = TornadoConnection('http://localhost:8983')
-    query = QueryCommand(handler='/solr/topic/select')
-    query.add_param('q', 'id:mikey id:lynda')
-    conn.execute(query, handle_request)
-    tornado.ioloop.IOLoop.instance().start()
-
-
-#   Test:
-#       [x] add with dictionary
-#       [ ] add with list of dictionaries
-#       [x] add with object
-#       [x] mixed add
-#       [ ] add with list of objects
-#       [ ] delete by id
-#       [ ] delete by list of ids
-#       [ ] delete by query
-#       [ ] delete by list of queries
-#       [ ] commit
-#       [ ] optimize
-#       [x] queries
-
-
