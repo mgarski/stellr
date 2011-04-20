@@ -19,6 +19,7 @@ import urllib
 import urllib2
 
 DEFAULT_TIMEOUT = 30
+TIMEOUT_MSG = "HTTP 599: Operation timed out"
 
 try:
     import tornado.httpclient as tornadolib
@@ -27,10 +28,11 @@ except ImportError:
 
 class StellrError(Exception):
     """Error that will be thrown from stellr."""
-    def __init__(self, message, url=None, timeout=False):
-        self.message = message
+    def __init__(self, message, url=None, timeout=False, code=-1):
+        self.message = str(message)
         self.url = url
         self.timeout = timeout
+        self.code = code
 
     def __str__(self):
         return self.message
@@ -155,10 +157,13 @@ class BlockingConnection(BaseConnection):
                                   timeout=self._timeout)
             return json.load(content)
         except urllib2.HTTPError as e:
-            raise StellrError(self._build_err_msg(e.code), url)
+            raise StellrError(self._build_err_msg(e.code),
+                              url=url, code=e.code)
         except urllib2.URLError as e:
             timeout = str(e.reason).lower().find('timed out') >= 0
-            raise StellrError(e.reason, url, timeout=timeout)
+            code = 599 if timeout else 500
+            message = TIMEOUT_MSG if timeout else self._build_err_msg(code)
+            raise StellrError(message, url, timeout=timeout, code=code)
         except Exception as e:
             raise StellrError(e, url)
 
@@ -184,18 +189,19 @@ class TornadoConnection(BaseConnection):
         h.fetch(request, self._receive_solr)
 
     def _receive_solr(self, response):
-        stellr_response = StellrResponse()
+        sr = StellrResponse()
         if response.error:
-            stellr_response.body = response.body
-            stellr_response.error = StellrError(response.error,
-                                                url=self._called_url)
+            error = response.error
+            timeout = error.errno == 28 and error.code == 599
+            sr.body = response.body
+            sr.error = StellrError(error, url=self._called_url,
+                                   code=error.code, timeout=timeout)
         else:
-            # TODO: ensure error messages formatted same as for blocking
             try:
-                stellr_response.body = json.loads(response.body)
+                sr.body = json.loads(response.body)
             except Exception as e:
-                stellr_response.body = response.body
-                stellr_response.error = StellrError(
+                sr.body = response.body
+                sr.error = StellrError(
                     'Response body could not be parsed: %s' % e,
                     url=self._called_url)
-        self._callback(stellr_response)
+        self._callback(sr)

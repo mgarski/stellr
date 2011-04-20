@@ -12,9 +12,10 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-import time
 import json
+import subprocess
 import threading
+import time
 import unittest
 
 import tornado.httpserver
@@ -26,54 +27,27 @@ import stellr
 HDR_CONTENT_TYPE = 'Content-Type'
 HDR_JSON = 'application/json'
 
-PRIMARY_PORT = 8080
-
-class QueryHandler(tornado.web.RequestHandler):
-    def post(self, *args, **kwargs):
-        sleep = self.get_argument('s', 0)
-
-        if sleep > 0:
-            time.sleep(int(sleep))
-
-        response = {'response': self.request.arguments }
-        self.set_header(HDR_CONTENT_TYPE, HDR_JSON)
-        self.write(json.dumps(response))
-
-class UpdateHandler(tornado.web.RequestHandler):
-    def post(self, *args, **kwargs):
-        self.write(json.dumps(self.request.arguments))
-
-class StellrHandler(tornado.web.RequestHandler):
-    def get(self, *args, **kwargs):
-        #TODO: create a stellr request to itself!
-        #TODO: support a timeout
-        self.write(json.dumps(self.request.arguments))
-
-
-application = tornado.web.Application([
-    (r"/query", QueryHandler),
-])
-
-class PrimaryApplication(threading.Thread):
-    def run(self):
-        http_server = tornado.httpserver.HTTPServer(application)
-        http_server.listen(PRIMARY_PORT)
-        tornado.ioloop.IOLoop.instance().start()
+TEST_PORT = 8080
 
 
 if __name__ == "__main__":
-    p = PrimaryApplication()
-    p.start()
-    print('server started')
+#    server = TimeoutTestServer()
+#    server.start()
+#    print('server started')
 
-    conn = stellr.BlockingConnection('http://localhost:' + str(PRIMARY_PORT))
-    query = stellr.QueryCommand(handler='/query')
-    query.add_param('q', 'a')
+    # start the test server in a subprocess and pause a bit while it starts up
+    child = subprocess.Popen(['python', 'test_server.py'])
+    time.sleep(5)
 
-    #TODO: assert this
-    print(conn.execute(query))
-
-    conn = stellr.BlockingConnection('http://localhost:' + str(PRIMARY_PORT), timeout=5)
+#    conn = stellr.BlockingConnection('http://localhost:' + str(PRIMARY_PORT))
+#    query = stellr.QueryCommand(handler='/query')
+#    query.add_param('q', 'a')
+#
+#    #TODO: assert this
+#    print(conn.execute(query))
+#
+    conn = stellr.BlockingConnection(
+            'http://localhost:' + str(TEST_PORT), timeout=5)
     query = stellr.QueryCommand(handler='/query')
     query.add_param('q', 'a')
     query.add_param('s', '10')
@@ -82,8 +56,33 @@ if __name__ == "__main__":
     except stellr.StellrError as e:
         #TODO: assert this
         print('Timeout: %s' % e.timeout)
+        print "Error:", e
+#
+#    conn = stellr.BlockingConnection(
+#            'http://localhost:' + str(PRIMARY_PORT), timeout=3)
+#    query = stellr.QueryCommand(handler='/stellr')
+#    query.add_param('q', 'a')
+#    query.add_param('s', '10')
+#    try:
+#        conn.execute(query)
+#    except stellr.StellrError as e:
+#        #TODO: assert this
+#        print('Timeout: %s' % e.timeout)
 
-    tornado.ioloop.IOLoop.instance().stop()
+#    conn = stellr.BlockingConnection(
+#            'http://localhost:' + str(TIMEOUT_TEST_PORT), timeout=10)
+#    query = stellr.QueryCommand(handler='/stellr')
+#    query.add_param('q', 'a')
+#    query.add_param('s', '3')
+#    query.add_param('t', '5')
+#    try:
+#        response = conn.execute(query)
+#    except stellr.StellrError as e:
+#        #TODO: assert this
+#        print('Timeout from stellr: %s' % e.timeout)
+#
+#    tornado.ioloop.IOLoop.instance().stop()
+#    child.terminate()
 
 
 
@@ -157,17 +156,22 @@ if __name__ == "__main__":
 #        print(e.url + '\n')
 #        print(e.message)
 #
-#    import tornado.ioloop
-#
-#    def handle_request(response):
-#        if response.error:
-#            print "Error:", response.error.inner
-#        else:
-#            print response.body
-#        tornado.ioloop.IOLoop.instance().stop()
-#
-#    conn = TornadoConnection('http://localhost:8983', timeout=0)
-#    query = QueryCommand(handler='/solr/topic/select')
-#    query.add_param('q', 'id:mikey id:lynda')
-#    conn.execute(query, handle_request)
-#    tornado.ioloop.IOLoop.instance().start()
+    import tornado.ioloop
+
+    def handle_request(response):
+        if response.error:
+            print "Error:", response.error
+            print "timeout:", response.error.timeout
+        else:
+            print response.body
+        tornado.ioloop.IOLoop.instance().stop()
+
+    conn = stellr.TornadoConnection('http://localhost:' + str(TEST_PORT), timeout=4)
+    query = stellr.QueryCommand(handler='/query')
+    query.add_param('q', 'a')
+    query.add_param('s', '5')
+    query.add_param('t', '5')
+    conn.execute(query, handle_request)
+    tornado.ioloop.IOLoop.instance().start()
+
+    child.terminate()
