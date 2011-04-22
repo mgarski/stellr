@@ -45,7 +45,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_query_command(self):
         q = stellr.QueryCommand(handler='/solr/test/search/')
-        self.assertEqual(q.handler, 'solr/test/search')
+        self.assertEqual(q.handler, 'solr/test/search?wt=json')
 
         self._add_query_params(q, CLAUSES)
         self.assertEqual(q._commands, CLAUSES)
