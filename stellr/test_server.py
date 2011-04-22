@@ -43,7 +43,7 @@ application = tornado.web.Application([
     (r"/update", UpdateHandler)
 ])
 
-class TestServer():
+class TestServer(object):
     def start(self):
         http_server = tornado.httpserver.HTTPServer(application)
         http_server.listen(PORT)
