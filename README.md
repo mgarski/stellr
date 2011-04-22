@@ -1,7 +1,7 @@
 stellr
 ======
 
-A Python API for Solr that supports non-blocking calls made running in a Tornado application as well as traditional blocking calls.
+A Python API for Solr that supports non-blocking calls made running in a Tornado application as well as blocking calls. The command objects provide full access to all of the parameters of an update or query and the JSON response from Solr is parsed into a nested dictionary.
 
 Requirements
 ------------
@@ -15,6 +15,9 @@ Requirements
 Notes
 -----
 
+* All calls to solr are made with wt=json.
+* Basic authentication is supported on all requests.
+* A timeout in seconds may be set on each call, defaulting to 30 seconds. If a timeout is encountered the timeout property on the StellrError raised will be True.
 * Field or document boosting is not yet supported.
 
 Usage
@@ -22,40 +25,39 @@ Usage
 
 ### Overview
 
-Create a connection object
-Create a command object
-Pass the command to the connection
-
-...
-
-Profit!
+* Create a connection object
+* Create a command object
+* Pass the command to the connection, catching any StellrError raised
 
 ### Blocking Calls
 
-An example will be coming, for now check out the test file
+    conn = stellr.BlockingConnection(<hostname>)
+    query = stellr.QueryCommand(handler='/query')
+    query.add_param('q', 'a')
+
+    try:
+        response = conn.execute(query)
+    except stellr.StellrError as e:
+        # handle appropriately
 
 ### Tornado Async Calls
 
-An example will be coming, for now check out the test file
+In your Tornado handler, follow the pattern below:
+
+    def get(self):
+        conn = stellr.TornadoConnection(<hostname>)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+        conn.execute(query, self._handle_response)
+
+     def _handle_response(self, response):
+        if response.error:
+            # handle appropriately
+        else:
+            # data is in response.body
 
 To Do
 -----
 
-Thorough testing of:
-    [x] add with dictionary
-    [ ] add with list of dictionaries
-    [x] add with object
-    [x] mixed add
-    [ ] add with list of objects
-    [ ] delete by id
-    [ ] delete by list of ids
-    [ ] delete by query
-    [ ] delete by list of queries
-    [ ] commit
-    [ ] optimize
-    [x] queries
-
 Docstrings
-Unit test
-Verify timeout for Tornado request
 

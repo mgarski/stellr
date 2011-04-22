@@ -45,6 +45,7 @@ class StellrResponse(object):
 class BaseCommand(object):
     def __init__(self, handler, content_type):
         self.handler = handler.lstrip('/').rstrip('/')
+        self.handler += '?wt=json'
         self.content_type =  content_type
         self._commands = list()
 
@@ -56,7 +57,6 @@ class UpdateCommand(BaseCommand):
                  commit=False, handler='/update/json'):
         BaseCommand.__init__(self, handler, 'application/json; charset=utf-8')
         self.commit_within = commit_within
-        self.handler += '?wt=json'
         if commit:
             self.handler += '&commit=true'
         self.content_type = ''
