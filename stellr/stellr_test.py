@@ -12,9 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-import json
 import subprocess
-import threading
 import time
 import unittest
 
@@ -27,151 +25,165 @@ import stellr
 HDR_CONTENT_TYPE = 'Content-Type'
 HDR_JSON = 'application/json'
 
-TEST_PORT = 8080
+TEST_HOST = 'http://localhost:8080'
+
+CLAUSES = [('q', 'test query'), ('sort', 'name asc')]
+
+DOCUMENTS = [
+        ['a', 1, ['a1', '1a']],
+        ['b', 2, ['b2', '2b']]]
+
+FIELDS = ['field1', 'field2', 'listField']
+
+class MockObject(object):
+    def __init__(self, field1, field2, listField):
+        self.field1 = field1
+        self.field2 = field2
+        self.listField = listField
+
+class StellrCommandTest(unittest.TestCase):
+
+    def test_query_command(self):
+        q = stellr.QueryCommand(handler='/solr/test/search/')
+        self.assertEqual(q.handler, 'solr/test/search')
+
+        self._add_query_params(q, CLAUSES)
+        self.assertEqual(q._commands, CLAUSES)
+
+        self.assertEqual(q.data, 'q=test+query&sort=name+asc')
+
+        q.clear_command()
+        self.assertEqual(len(q._commands), 0)
+
+    def test_update(self):
+        u = stellr.UpdateCommand(commit_within=60000)
+        self.assertEqual(u.handler, 'update/json?wt=json')
+
+        a = MockObject(DOCUMENTS[0][0], DOCUMENTS[0][1], DOCUMENTS[0][2])
+        u.add_update(a)
+
+        b = dict()
+        for i, field in enumerate(FIELDS):
+            b[field] = DOCUMENTS[1][i]
+        u.add_update(b)
+
+        self.assertEqual(len(u._commands), 2)
+        for i, command in enumerate(u._commands):
+            self.assertEqual(command['commitWithin'], 60000)
+            self.assertTrue('add' in command)
+            self.assertTrue('doc' in command['add'])
+            for field, value in command['add']['doc'].iteritems():
+                field_ord = FIELDS.index(field)
+                self.assertEqual(DOCUMENTS[i][field_ord], value)
+
+    def test_delete(self):
+        u = stellr.UpdateCommand()
+        u.add_delete_by_id(0)
+        u.add_delete_by_id([1, 2])
+        self.assertTrue(len(u._commands), 3)
+        for i, delete in enumerate(u._commands):
+            self.assertEquals(delete['delete']['id'], i)
+
+        u.clear_command()
+        u.add_delete_by_query('field1:value0')
+        u.add_delete_by_query(['field1:value1', 'field1:value2'])
+        self.assertTrue(len(u._commands), 3)
+        for i, delete in enumerate(u._commands):
+            self.assertEquals(delete['delete']['query'],
+                              'field1:value' + str(i))
+
+    def test_commit(self):
+        u = stellr.UpdateCommand(commit=True)
+        self.assertEqual(u.handler, 'update/json?wt=json&commit=true')
+
+        u.add_commit()
+        self.assertEqual(len(u._commands), 1)
+        self.assertTrue('commit' in u._commands[0])
+        self.assertEqual(len(u._commands[0]['commit']), 0)
+
+    def test_optimize(self):
+        u = stellr.UpdateCommand()
+
+        u.add_optimize()
+        self.assertEqual(len(u._commands), 1)
+        self.assertTrue('optimize' in u._commands[0])
+        self.assertFalse(u._commands[0]['optimize']['waitFlush'])
+        self.assertFalse(u._commands[0]['optimize']['waitSearcher'])
+
+        u.clear_command()
+        u.add_optimize(wait_flush=True)
+        self.assertEqual(len(u._commands), 1)
+        self.assertTrue('optimize' in u._commands[0])
+        self.assertTrue(u._commands[0]['optimize']['waitFlush'])
+        self.assertFalse(u._commands[0]['optimize']['waitSearcher'])
+
+        u.clear_command()
+        u.add_optimize(wait_searcher=True)
+        self.assertEqual(len(u._commands), 1)
+        self.assertTrue('optimize' in u._commands[0])
+        self.assertFalse(u._commands[0]['optimize']['waitFlush'])
+        self.assertTrue(u._commands[0]['optimize']['waitSearcher'])
+
+    def _add_query_params(self, command, params):
+        for param in params:
+            command.add_param(param[0], param[1])
+
+class StellrConnectionTest(unittest.TestCase):
+
+    def test_blocking_connection(self):
+        conn = stellr.BlockingConnection(TEST_HOST)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+
+        response = conn.execute(query)
+        self.assertEquals(response['response']['q'], ['a'])
+
+    def test_blocking_connection_timeout(self):
+        conn = stellr.BlockingConnection(TEST_HOST, timeout=2)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+        query.add_param('s', '3')
+
+        success = False
+        try:
+            conn.execute(query)
+            success = True
+        except stellr.StellrError as e:
+            self.assertTrue(e.timeout)
+
+        self.assertFalse(success)
+
+    def test_tornado_connection(self):
+        conn = stellr.TornadoConnection(TEST_HOST)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+        conn.execute(query, self._handle_response)
+        tornado.ioloop.IOLoop.instance().start()
+
+    def test_tornado_connection_timeout(self):
+        conn = stellr.TornadoConnection(TEST_HOST, timeout=2)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+        query.add_param('s', '3')
+        conn.execute(query, self._handle_timeout)
+        tornado.ioloop.IOLoop.instance().start()
+
+    def _handle_response(self, response):
+        self.assertFalse(response.error)
+        self.assertEquals(response.body['response']['q'], ['a'])
+        tornado.ioloop.IOLoop.instance().stop()
+
+    def _handle_timeout(self, response):
+        self.assertTrue(response.error.timeout)
+        tornado.ioloop.IOLoop.instance().stop()
+
 
 
 if __name__ == "__main__":
-#    server = TimeoutTestServer()
-#    server.start()
-#    print('server started')
-
-    # start the test server in a subprocess and pause a bit while it starts up
-    child = subprocess.Popen(['python', 'test_server.py'])
+    # start the test server in a child process and pause while it starts up
+    child_process = subprocess.Popen(['python', 'test_server.py'])
     time.sleep(5)
-
-#    conn = stellr.BlockingConnection('http://localhost:' + str(PRIMARY_PORT))
-#    query = stellr.QueryCommand(handler='/query')
-#    query.add_param('q', 'a')
-#
-#    #TODO: assert this
-#    print(conn.execute(query))
-#
-    conn = stellr.BlockingConnection(
-            'http://localhost:' + str(TEST_PORT), timeout=5)
-    query = stellr.QueryCommand(handler='/query')
-    query.add_param('q', 'a')
-    query.add_param('s', '10')
     try:
-        conn.execute(query)
-    except stellr.StellrError as e:
-        #TODO: assert this
-        print('Timeout: %s' % e.timeout)
-        print "Error:", e
-#
-#    conn = stellr.BlockingConnection(
-#            'http://localhost:' + str(PRIMARY_PORT), timeout=3)
-#    query = stellr.QueryCommand(handler='/stellr')
-#    query.add_param('q', 'a')
-#    query.add_param('s', '10')
-#    try:
-#        conn.execute(query)
-#    except stellr.StellrError as e:
-#        #TODO: assert this
-#        print('Timeout: %s' % e.timeout)
-
-#    conn = stellr.BlockingConnection(
-#            'http://localhost:' + str(TIMEOUT_TEST_PORT), timeout=10)
-#    query = stellr.QueryCommand(handler='/stellr')
-#    query.add_param('q', 'a')
-#    query.add_param('s', '3')
-#    query.add_param('t', '5')
-#    try:
-#        response = conn.execute(query)
-#    except stellr.StellrError as e:
-#        #TODO: assert this
-#        print('Timeout from stellr: %s' % e.timeout)
-#
-#    tornado.ioloop.IOLoop.instance().stop()
-#    child.terminate()
-
-
-
-#
-#class MockObj(object):
-#    pass
-
-#    try:
-#        test = BlockingConnection('test')
-#        print(test)
-#    except StellrError:
-#        print("BlockingConnection failed")
-#
-#
-#    try:
-#        test = TornadoConnection("test", "u", "p")
-#        print(test)
-#    except StellrError:
-#        print("TornadoConnection failed")
-#
-#    q = QueryCommand()
-#    q.add_param('q', 'test')
-#    q.add_param('qf', 'one,two')
-#    print(q._commands)
-#    print(q.data)
-#
-#    a = UpdateCommand(commit_within=1000)
-#    a.add_update([{'d': 'val1', 'e': 2},{'d': 'val2', 'e':[1,2,'3']}])
-#    print(a.data)
-#
-#    m = MockObj()
-#    m.a = '123'
-#    m.b = [1, 2, 3]
-#    a.add_update(m)
-#    print(a.data)
-#
-#    conn = BlockingConnection('http://localhost:8983')
-#    query = QueryCommand(handler='/solr/topic/select')
-#    query.add_param('q', 'a')
-#    try:
-#        print(conn.execute(query))
-#    except StellrError as e:
-#        print(e.url + '\n')
-#        print(e.message)
-#
-#    conn = BlockingConnection('http://localhost:8983',
-#                              user='update', password='update!', timeout=1500)
-#    update = UpdateCommand(handler='/solr/topic/update/json',
-#                           commit=True)
-#    update.add_update({'id': 'mikey', 'topicname': 'mikey', 'topicuri':'/mikey', 'topictype':'mikey'})
-#    m = MockObj()
-#    m.id = 'lynda'
-#    m.topicname = 'lynda'
-#    m.topicuri = '/lynda'
-#    m.topictype = 'lynda'
-#    update.add_update(m)
-#
-#    try:
-#        print(conn.execute(update))
-#    except StellrError as e:
-#        print(e.url)
-#        print(e.message)
-#        print('Time out? ' + str(e.timeout))
-
-#    conn = BlockingConnection('http://localhost:8983')
-#    query = QueryCommand(handler='/solr/topic/select')
-#    query.add_param('q', 'id:mikey id:lynda')
-#    try:
-#        print(conn.execute(query))
-#    except StellrError as e:
-#        print(e.url + '\n')
-#        print(e.message)
-#
-    import tornado.ioloop
-
-    def handle_request(response):
-        if response.error:
-            print "Error:", response.error
-            print "timeout:", response.error.timeout
-        else:
-            print response.body
-        tornado.ioloop.IOLoop.instance().stop()
-
-    conn = stellr.TornadoConnection('http://localhost:' + str(TEST_PORT), timeout=4)
-    query = stellr.QueryCommand(handler='/query')
-    query.add_param('q', 'a')
-    query.add_param('s', '5')
-    query.add_param('t', '5')
-    conn.execute(query, handle_request)
-    tornado.ioloop.IOLoop.instance().start()
-
-    child.terminate()
+        unittest.main()
+    finally:
+        child_process.terminate()

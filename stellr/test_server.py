@@ -22,12 +22,11 @@ import tornado.web
 HDR_CONTENT_TYPE = 'Content-Type'
 HDR_JSON = 'application/json'
 
-TEST_PORT = 8080
+PORT = 8080
 
 class QueryHandler(tornado.web.RequestHandler):
     def post(self, *args, **kwargs):
         sleep = self.get_argument('s', 0)
-        print('sleeping %s' % sleep)
         if sleep > 0:
             time.sleep(int(sleep))
 
@@ -47,7 +46,7 @@ application = tornado.web.Application([
 class TestServer():
     def start(self):
         http_server = tornado.httpserver.HTTPServer(application)
-        http_server.listen(TEST_PORT)
+        http_server.listen(PORT)
         tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":

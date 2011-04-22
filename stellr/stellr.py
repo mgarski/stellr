@@ -83,14 +83,14 @@ class UpdateCommand(BaseCommand):
         self._commands.append(cmd)
 
     def add_delete_by_id(self, data):
-        if isinstance(data, Iterable):
+        if isinstance(data, list):
             for id in data:
                 self._append_delete('id', id)
         else:
             self._append_delete('id', data)
 
     def add_delete_by_query(self, data):
-        if isinstance(data, Iterable):
+        if isinstance(data, list):
             for query in data:
                 self._append_delete('query', query)
         else:
