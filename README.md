@@ -14,12 +14,7 @@ Requirements
 
 Notes
 -----
-
-<<<<<<< HEAD
 * All calls to Solr are made with wt=json.
-=======
-* All calls to solr are made with wt=json.
->>>>>>> 3a5e312e97e72c7c96bab4f0cbaddb3cad6a7459
 * Basic authentication is supported on all requests.
 * A timeout in seconds may be set on each call, defaulting to 30 seconds. If a timeout is encountered the timeout property on the StellrError raised will be True.
 * Field or document boosting is not yet supported.
@@ -64,4 +59,5 @@ To Do
 -----
 
 Docstrings
+Setup
 
