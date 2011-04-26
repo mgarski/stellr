@@ -161,9 +161,8 @@ class BlockingConnection(BaseConnection):
                               url=url, code=e.code)
         except urllib2.URLError as e:
             timeout = str(e.reason).lower().find('timed out') >= 0
-            code = 599 if timeout else 500
-            message = TIMEOUT_MSG if timeout else self._build_err_msg(code)
-            raise StellrError(message, url, timeout=timeout, code=code)
+            message = TIMEOUT_MSG if timeout else self._build_err_msg(500)
+            raise StellrError(message, url, timeout=timeout, code=500)
         except Exception as e:
             raise StellrError(e, url)
 
@@ -193,6 +192,7 @@ class TornadoConnection(BaseConnection):
         if response.error:
             error = response.error
             timeout = error.errno == 28 and error.code == 599
+            error.code = error.code if error.code != 599 else 500
             sr.body = response.body
             sr.error = StellrError(error, url=self._called_url,
                                    code=error.code, timeout=timeout)
