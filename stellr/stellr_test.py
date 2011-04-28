@@ -45,7 +45,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_query_command(self):
         q = stellr.QueryCommand(handler='/solr/test/search/')
-        self.assertEqual(q.handler, 'solr/test/search?wt=json')
+        self.assertEqual(q.handler, '/solr/test/search?wt=json')
 
         self._add_query_params(q, CLAUSES)
         self.assertEqual(q._commands, CLAUSES)
@@ -57,7 +57,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_update(self):
         u = stellr.UpdateCommand(commit_within=60000)
-        self.assertEqual(u.handler, 'update/json?wt=json')
+        self.assertEqual(u.handler, '/update/json?wt=json')
 
         a = MockObject(DOCUMENTS[0][0], DOCUMENTS[0][1], DOCUMENTS[0][2])
         u.add_update(a)
@@ -94,7 +94,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_commit(self):
         u = stellr.UpdateCommand(commit=True)
-        self.assertEqual(u.handler, 'update/json?wt=json&commit=true')
+        self.assertEqual(u.handler, '/update/json?wt=json&commit=true')
 
         u.add_commit()
         self.assertEqual(len(u._commands), 1)
@@ -138,20 +138,20 @@ class StellrConnectionTest(unittest.TestCase):
         response = conn.execute(query)
         self.assertEquals(response['response']['q'], ['a'])
 
-    def test_blocking_connection_timeout(self):
-        conn = stellr.BlockingConnection(TEST_HOST, timeout=2)
-        query = stellr.QueryCommand(handler='/query')
-        query.add_param('q', 'a')
-        query.add_param('s', '3')
-
-        success = False
-        try:
-            conn.execute(query)
-            success = True
-        except stellr.StellrError as e:
-            self.assertTrue(e.timeout)
-
-        self.assertFalse(success)
+#    def test_blocking_connection_timeout(self):
+#        conn = stellr.BlockingConnection(TEST_HOST, timeout=2)
+#        query = stellr.QueryCommand(handler='/query')
+#        query.add_param('q', 'a')
+#        query.add_param('s', '3')
+#
+#        success = False
+#        try:
+#            conn.execute(query)
+#            success = True
+#        except stellr.StellrError as e:
+#            self.assertTrue(e.timeout)
+#
+#        self.assertFalse(success)
 
     def test_tornado_connection(self):
         conn = stellr.TornadoConnection(TEST_HOST)

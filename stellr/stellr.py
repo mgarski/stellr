@@ -12,11 +12,12 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import base64
 from collections import Iterable
 import httplib
 import json
+import platform
 import urllib
-import urllib2
 
 DEFAULT_TIMEOUT = 30
 TIMEOUT_MSG = "HTTP 599: Operation timed out"
@@ -44,7 +45,7 @@ class StellrResponse(object):
 
 class BaseCommand(object):
     def __init__(self, handler, content_type):
-        self.handler = handler.lstrip('/').rstrip('/')
+        self.handler = '/' + handler.lstrip('/').rstrip('/')
         self.handler += '?wt=json'
         self.content_type =  content_type
         self._commands = list()
@@ -59,7 +60,6 @@ class UpdateCommand(BaseCommand):
         self.commit_within = commit_within
         if commit:
             self.handler += '&commit=true'
-        self.content_type = ''
 
     @property
     def data(self):
@@ -121,50 +121,58 @@ class QueryCommand(BaseCommand):
         return urllib.urlencode(self._commands)
 
 class BaseConnection(object):
-    def __init__(self, url, user=None, password=None,
+    def __init__(self, host, user=None, password=None,
                  timeout=DEFAULT_TIMEOUT):
-        self._url = url.rstrip('/') + '/'
+        self._host = host.rstrip('/')
         self._user = user
         self._password = password
         self._timeout = timeout
 
     def __str__(self):
         return 'host=%s, user=%s, password=%s' % \
-               (self._url, self._user, self._password)
+               (self._host, self._user, self._password)
 
     def _build_err_msg(self, http_code):
         return 'HTTP %s: %s' % (http_code, httplib.responses[http_code])
 
 class BlockingConnection(BaseConnection):
-    def __init__(self, url, user=None, password=None,
+    def __init__(self, host, user=None, password=None,
                  timeout=DEFAULT_TIMEOUT):
-        BaseConnection.__init__(self, url, user, password, timeout)
+        host = host.lstrip('http://')
+        BaseConnection.__init__(self, host, user, password, timeout)
+        # no timeout for mac or sporadic socket errors will ensue
+        if platform.mac_ver()[0]:
+            self._timeout = None
+        else:
+            self._timeout = timeout
 
     def execute(self, command):
-        url = self._url + command.handler
-        if self._user and self._password:
-            handler = urllib2.HTTPBasicAuthHandler()
-            handler.add_password(realm='Solr Realm', uri=url,
-                                 user=self._user, passwd=self._password)
-        else:
-            handler = urllib2.HTTPHandler()
-
-        opener = urllib2.build_opener(handler)
-        opener.addheaders = [('content-type', command.content_type)]
-
+        conn = httplib.HTTPConnection(self._host, timeout=self._timeout)
+        data = command.data.encode('UTF-8')
+        headers = self._assemble_headers(command.content_type)
         try:
-            content = opener.open(url, command.data.encode('UTF-8'),
-                                  timeout=self._timeout)
-            return json.load(content)
-        except urllib2.HTTPError as e:
-            raise StellrError(self._build_err_msg(e.code),
-                              url=url, code=e.code)
-        except urllib2.URLError as e:
-            timeout = str(e.reason).lower().find('timed out') >= 0
-            message = TIMEOUT_MSG if timeout else self._build_err_msg(500)
-            raise StellrError(message, url, timeout=timeout, code=500)
+            conn.request('POST', command.handler, data, headers)
+            response = conn.getresponse()
+            if response.status == 200:
+                return json.loads(response.read())
+            else:
+                raise StellrError(self._build_err_msg(response.status),
+                                  url=self._host + command.handler,
+                                  code=response.status)
+        except StellrError:
+            raise
         except Exception as e:
-            raise StellrError(e, url)
+            raise StellrError(e, self._host + command.handler, code=500)
+        finally:
+            conn.close()
+
+    def _assemble_headers(self, content_type):
+        headers = {'content-type': content_type}
+        if self._user and self._password:
+            auth = self._user + ':' + self._password
+            auth = 'Basic ' + base64.b64encode(auth)
+            headers['Authorization'] = auth
+        return headers
 
 
 class TornadoConnection(BaseConnection):
@@ -178,7 +186,7 @@ class TornadoConnection(BaseConnection):
 
     def execute(self, command, callback):
         self._callback = callback
-        self._called_url = self._url + command.handler
+        self._called_url = self._host + command.handler
         body = command.data.encode('UTF-8')
         request = tornadolib.HTTPRequest(self._called_url, method='POST',
                 body=body, headers={'content-type': command.content_type},
@@ -192,7 +200,7 @@ class TornadoConnection(BaseConnection):
         if response.error:
             error = response.error
             timeout = error.errno == 28 and error.code == 599
-            error.code = error.code if error.code != 599 else 500
+            error.code = error.code if error.code != 599 else 504
             sr.body = response.body
             sr.error = StellrError(error, url=self._called_url,
                                    code=error.code, timeout=timeout)
