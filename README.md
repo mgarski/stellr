@@ -11,13 +11,13 @@ Requirements
 * The Tornado library is only needed to run the unit tests, the blocking calls will work fine with only the standard library
 * Solr 3.1+ as updates use the JSON update handler http://wiki.apache.org/solr/UpdateJSON.
 
-
 Notes
 -----
 * All calls to Solr are made with wt=json.
 * Basic authentication is supported on all requests.
 * A timeout in seconds may be set on each call, defaulting to 30 seconds. If a timeout is encountered the timeout property on the StellrError raised will be True.
 * Field or document boosting is not yet supported.
+* Timeout for a blocking connection on Mac is currently not supported due to issues with sporadic 'socket.error: [Errno 35] Resource temporarily unavailable' when a timeout is set.
 
 Usage
 -----
@@ -58,6 +58,8 @@ In your Tornado handler, follow the pattern below:
 To Do
 -----
 
+Test BlockingConnection timeout on Linux
+Switch to httplib2 for blocking call timeouts?
 Docstrings
 Setup
 

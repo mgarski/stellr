@@ -12,6 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import platform
 import subprocess
 import time
 import unittest
@@ -138,20 +139,24 @@ class StellrConnectionTest(unittest.TestCase):
         response = conn.execute(query)
         self.assertEquals(response['response']['q'], ['a'])
 
-#    def test_blocking_connection_timeout(self):
-#        conn = stellr.BlockingConnection(TEST_HOST, timeout=2)
-#        query = stellr.QueryCommand(handler='/query')
-#        query.add_param('q', 'a')
-#        query.add_param('s', '3')
-#
-#        success = False
-#        try:
-#            conn.execute(query)
-#            success = True
-#        except stellr.StellrError as e:
-#            self.assertTrue(e.timeout)
-#
-#        self.assertFalse(success)
+    def test_blocking_connection_timeout(self):
+        # mac blocking calls not supported :(
+        self.assertFalse(platform.mac_ver()[0],
+            'Blocking connection timeouts are not supported on Mac')
+
+        conn = stellr.BlockingConnection(TEST_HOST, timeout=2)
+        query = stellr.QueryCommand(handler='/query')
+        query.add_param('q', 'a')
+        query.add_param('s', '3')
+
+        success = False
+        try:
+            conn.execute(query)
+            success = True
+        except stellr.StellrError as e:
+            self.assertTrue(e.timeout)
+
+        self.assertFalse(success)
 
     def test_tornado_connection(self):
         conn = stellr.TornadoConnection(TEST_HOST)
