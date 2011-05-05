@@ -79,7 +79,7 @@ class UpdateCommand(BaseCommand):
             doc = doc.__dict__
         cmd = {'add': {'doc': doc}}
         if self.commit_within is not None:
-            cmd['commitWithin'] = self.commit_within
+            cmd['add']['commitWithin'] = self.commit_within
         self._commands.append(cmd)
 
     def add_delete_by_id(self, data):
