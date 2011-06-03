@@ -70,7 +70,7 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertEqual(len(u._commands), 2)
         for i, command in enumerate(u._commands):
-            self.assertEqual(command['commitWithin'], 60000)
+            self.assertEqual(command['add']['commitWithin'], 60000)
             self.assertTrue('add' in command)
             self.assertTrue('doc' in command['add'])
             for field, value in command['add']['doc'].iteritems():

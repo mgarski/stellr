@@ -114,7 +114,7 @@ class QueryCommand(BaseCommand):
                              charset=utf-8')
 
     def add_param(self, name, value):
-        self._commands.append((name, value))
+        self._commands.append((name, value.encode('utf-8')))
 
     @property
     def data(self):
@@ -148,7 +148,7 @@ class BlockingConnection(BaseConnection):
 
     def execute(self, command):
         conn = httplib.HTTPConnection(self._host, timeout=self._timeout)
-        data = command.data.encode('UTF-8')
+        data = command.data
         headers = self._assemble_headers(command.content_type)
         try:
             conn.request('POST', command.handler, data, headers)
