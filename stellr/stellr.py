@@ -187,7 +187,7 @@ class TornadoConnection(BaseConnection):
     def execute(self, command, callback):
         self._callback = callback
         self._called_url = self._host + command.handler
-        body = command.data.encode('UTF-8')
+        body = command.data
         request = tornadolib.HTTPRequest(self._called_url, method='POST',
                 body=body, headers={'content-type': command.content_type},
                 auth_username=self._user, auth_password=self._password,
