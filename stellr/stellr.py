@@ -114,6 +114,7 @@ class QueryCommand(BaseCommand):
                              charset=utf-8')
 
     def add_param(self, name, value):
+        value = unicode(value)
         self._commands.append((name, value.encode('utf-8')))
 
     @property
