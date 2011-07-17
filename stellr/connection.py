@@ -35,9 +35,10 @@ class StellrError(Exception):
         msg: a message with information about the error
         url: the url that was called
         timeout: a boolean indicating whether a timeout occurred
-        code: the http error code received from the remote host
+        code: the http error code received from the remote host, or if less
+        than 0 the remote host was never called
     """
-    def __init__(self, message, url=None, timeout=False, code=500):
+    def __init__(self, message, url=None, timeout=False, code=-1):
         super(Exception, self).__init__()
         self.msg = str(message)
         self.url = url
