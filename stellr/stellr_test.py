@@ -58,7 +58,8 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_update(self):
         u = stellr.UpdateCommand(commit_within=60000)
-        self.assertEqual(u.handler, '/update/json?wt=json')
+        self.assertEqual(u.handler, ('/solr/update/json?'
+                                     'wt=json&commitWithin=60000'))
 
         a = MockObject(DOCUMENTS[0][0], DOCUMENTS[0][1], DOCUMENTS[0][2])
         u.add_update(a)
@@ -70,10 +71,9 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertEqual(len(u._commands), 2)
         for i, command in enumerate(u._commands):
-            self.assertEqual(command['add']['commitWithin'], 60000)
-            self.assertTrue('add' in command)
-            self.assertTrue('doc' in command['add'])
-            for field, value in command['add']['doc'].iteritems():
+            self.assertEqual(command[0], 'add')
+            self.assertTrue('doc' in command[1])
+            for field, value in command[1]['doc'].iteritems():
                 field_ord = FIELDS.index(field)
                 self.assertEqual(DOCUMENTS[i][field_ord], value)
 
@@ -83,24 +83,23 @@ class StellrCommandTest(unittest.TestCase):
         u.add_delete_by_id([1, 2])
         self.assertTrue(len(u._commands), 3)
         for i, delete in enumerate(u._commands):
-            self.assertEquals(delete['delete']['id'], i)
+            self.assertEquals(delete, ('delete', {'id': i}))
 
         u.clear_command()
         u.add_delete_by_query('field1:value0')
         u.add_delete_by_query(['field1:value1', 'field1:value2'])
         self.assertTrue(len(u._commands), 3)
         for i, delete in enumerate(u._commands):
-            self.assertEquals(delete['delete']['query'],
-                              'field1:value' + str(i))
+            self.assertEquals(delete, ('delete',
+                                       {'query': 'field1:value' + str(i)}))
 
     def test_commit(self):
         u = stellr.UpdateCommand(commit=True)
-        self.assertEqual(u.handler, '/update/json?wt=json&commit=true')
+        self.assertEqual(u.handler, '/solr/update/json?wt=json&commit=true')
 
         u.add_commit()
         self.assertEqual(len(u._commands), 1)
-        self.assertTrue('commit' in u._commands[0])
-        self.assertEqual(len(u._commands[0]['commit']), 0)
+        self.assertEqual(('commit', {}), u._commands[0])
 
     def test_optimize(self):
         u = stellr.UpdateCommand()
@@ -108,22 +107,6 @@ class StellrCommandTest(unittest.TestCase):
         u.add_optimize()
         self.assertEqual(len(u._commands), 1)
         self.assertTrue('optimize' in u._commands[0])
-        self.assertFalse(u._commands[0]['optimize']['waitFlush'])
-        self.assertFalse(u._commands[0]['optimize']['waitSearcher'])
-
-        u.clear_command()
-        u.add_optimize(wait_flush=True)
-        self.assertEqual(len(u._commands), 1)
-        self.assertTrue('optimize' in u._commands[0])
-        self.assertTrue(u._commands[0]['optimize']['waitFlush'])
-        self.assertFalse(u._commands[0]['optimize']['waitSearcher'])
-
-        u.clear_command()
-        u.add_optimize(wait_searcher=True)
-        self.assertEqual(len(u._commands), 1)
-        self.assertTrue('optimize' in u._commands[0])
-        self.assertFalse(u._commands[0]['optimize']['waitFlush'])
-        self.assertTrue(u._commands[0]['optimize']['waitSearcher'])
 
     def _add_query_params(self, command, params):
         for param in params:

@@ -14,6 +14,7 @@
 
 import base64
 from collections import Iterable
+from cStringIO import StringIO
 import httplib
 import json
 import platform
@@ -30,13 +31,13 @@ except ImportError:
 class StellrError(Exception):
     """Error that will be thrown from stellr."""
     def __init__(self, message, url=None, timeout=False, code=-1):
-        self.message = str(message)
+        self.msg = str(message)
         self.url = url
         self.timeout = timeout
         self.code = code
 
     def __str__(self):
-        return self.message
+        return self.msg
 
 class StellrResponse(object):
     def __init__(self, body=None, error=None):
@@ -55,15 +56,25 @@ class BaseCommand(object):
 
 class UpdateCommand(BaseCommand):
     def __init__(self, commit_within=None,
-                 commit=False, handler='/update/json'):
+                 commit=False, handler='/solr/update/json'):
         BaseCommand.__init__(self, handler, 'application/json; charset=utf-8')
         self.commit_within = commit_within
         if commit:
             self.handler += '&commit=true'
+        elif commit_within is not None:
+            self.handler += '&commitWithin=' + str(commit_within)
 
     @property
     def data(self):
-        return json.dumps(self._commands)
+        ret_val = StringIO()
+        ret_val.write('{')
+        for i in range(len(self._commands)):
+            command = self._commands[i]
+            ret_val.write('"%s": %s' % (command[0], json.dumps(command[1])))
+            if i != len(self._commands) - 1:
+                ret_val.write(',')
+        ret_val.write('}')
+        return ret_val.getvalue()
 
     def add_update(self, data):
         if type(data) is dict:
@@ -77,10 +88,7 @@ class UpdateCommand(BaseCommand):
     def _append_update(self, doc):
         if hasattr(doc, '__dict__'):
             doc = doc.__dict__
-        cmd = {'add': {'doc': doc}}
-        if self.commit_within is not None:
-            cmd['add']['commitWithin'] = self.commit_within
-        self._commands.append(cmd)
+        self._commands.append(('add', {'doc': doc}))
 
     def add_delete_by_id(self, data):
         if isinstance(data, list):
@@ -97,15 +105,13 @@ class UpdateCommand(BaseCommand):
             self._append_delete('query', data)
 
     def _append_delete(self, delete_type, data):
-        self._commands.append({'delete': {delete_type: data}})
+        self._commands.append(('delete', {delete_type: data}))
 
     def add_commit(self):
-        self._commands.append({'commit': {}})
+        self._commands.append(('commit', {}))
 
-    def add_optimize(self, wait_flush=False, wait_searcher=False):
-        self._commands.append({'optimize':
-                                {'waitFlush':wait_flush,
-                                 'waitSearcher':wait_searcher }})
+    def add_optimize(self):
+        self._commands.append(('optimize', {}))
 
 class QueryCommand(BaseCommand):
     def __init__(self, handler='/solr/select'):
@@ -200,7 +206,11 @@ class TornadoConnection(BaseConnection):
         sr = StellrResponse()
         if response.error:
             error = response.error
-            timeout = error.errno == 28 and error.code == 599
+            timeout = False
+            try:
+                timeout = error.errno == 28 and error.code == 599
+            except AttributeError:
+                timeout = error.code == 599
             error.code = error.code if error.code != 599 else 504
             sr.body = response.body
             sr.error = StellrError(error, url=self._called_url,
