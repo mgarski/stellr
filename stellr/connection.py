@@ -13,12 +13,9 @@
 #   limitations under the License.
 
 import base64
-from collections import Iterable
-from cStringIO import StringIO
 import httplib
 import json
 import platform
-import urllib
 
 DEFAULT_TIMEOUT = 30
 TIMEOUT_MSG = "HTTP 599: Operation timed out"
@@ -31,8 +28,17 @@ except ImportError:
     tornado_loop = None
 
 class StellrError(Exception):
-    """Error that will be thrown from stellr."""
-    def __init__(self, message, url=None, timeout=False, code=-1):
+    """
+    Error that will be thrown from a Connection instance during the
+    execution of a command. The error has the following fields avaialble:
+
+        msg: a message with information about the error
+        url: the url that was called
+        timeout: a boolean indicating whether a timeout occurred
+        code: the http error code received from the remote host
+    """
+    def __init__(self, message, url=None, timeout=False, code=500):
+        super(Exception, self).__init__()
         self.msg = str(message)
         self.url = url
         self.timeout = timeout
@@ -40,6 +46,14 @@ class StellrError(Exception):
 
     def __str__(self):
         return self.msg
+
+class StellrResponse(object):
+    """
+
+    """
+    def __init__(self, body=None, error=None):
+        self.body = body
+        self.error = error
 
 class Connection(object):
     def __init__(self, host, port=8983, user=None, password=None,
@@ -50,7 +64,12 @@ class Connection(object):
         the connection made will be a blocking connection using httplib. The
         timeout will not be honored with a blocking connection on Mac OSX as
         sporadic socket errors will ensue.
-        """                                                                                                     ""
+        """
+        self._is_non_blocking = tornado_loop \
+            and tornado_loop.IOLoop.initialized() \
+            and tornado_loop.IOLoop.running()
+        if not self.is_non_blocking():
+            host = host.lstrip('http://')
         self._host = '%s:%i' % (host.rstrip('/'), port)
         self._user = user
         self._password = password
@@ -58,11 +77,10 @@ class Connection(object):
         self._max_clients = max_clients
 
     def is_non_blocking(self):
-        """Return whether the connection instance will be
-        non-blocking or not."""
-        return tornado_loop \
-            and tornado_loop.IOLoop.initialized() \
-            and tornado_loop.IOLoop.running()
+        """
+        Return whether the connection instance will be non-blocking or not.
+        """
+        return self._is_non_blocking
 
     def __str__(self):
         return 'host=%s, user=%s, password=%s, max clients=%i' % \
@@ -73,42 +91,16 @@ class Connection(object):
 
     def _set_timeout(self, timeout):
         # no timeout for mac with a blocking connection
-        # or sporadic socket errors will ensue
         if not self.is_non_blocking() and platform.mac_ver()[0]:
             return None
         else:
             return timeout
 
-
-
-class BaseConnection(object):
-    def __init__(self, host, user=None, password=None,
-                 timeout=DEFAULT_TIMEOUT):
-        self._host = host.rstrip('/')
-        self._user = user
-        self._password = password
-        self._timeout = timeout
-
-
-    def __str__(self):
-        return 'host=%s, user=%s, password=%s' % \
-               (self._host, self._user, self._password)
-
-    def _build_err_msg(self, http_code):
-        return 'HTTP %s: %s' % (http_code, httplib.responses[http_code])
-
-class BlockingConnection(BaseConnection):
-    def __init__(self, host, user=None, password=None,
-                 timeout=DEFAULT_TIMEOUT):
-        host = host.lstrip('http://')
-        BaseConnection.__init__(self, host, user, password, timeout)
-        # no timeout for mac or sporadic socket errors will ensue
-        if platform.mac_ver()[0]:
-            self._timeout = None
-        else:
-            self._timeout = timeout
-
-    def execute(self, command):
+    def execute_blocking(self, command):
+        """
+        Executes the command using a blocking connection (httplib) and
+        returns an instance of SolrResponse.
+        """
         conn = httplib.HTTPConnection(self._host, timeout=self._timeout)
         data = command.data
         headers = self._assemble_headers(command.content_type)
@@ -136,25 +128,26 @@ class BlockingConnection(BaseConnection):
             headers['Authorization'] = auth
         return headers
 
+    def execute_non_blocking(self, command, callback):
+        """
+        Execute the command using a non-blocking connection, calling the
+        value of the callback parameter passing an instance of StellrResponse
+        as it's only parameter.
 
-class TornadoConnection(BaseConnection):
-    def __init__(self, url, user=None, password=None,
-                 max_clients=10, timeout=DEFAULT_TIMEOUT):
-        if not tornadolib:
-            raise StellrError(None, 'tornado.httpclient is required \
-                                   for non-blocking connections')
-        BaseConnection.__init__(self, url, user, password, timeout)
-        self._max_clients = max_clients
-
-    def execute(self, command, callback):
+        If this method is called without being in the context of a currently
+        running Tornado IOLoop, a StellrError will be raised.
+        """
+        if not self.is_non_blocking():
+            raise StellrError('No IOLoop context found '
+                              'to make non-blocking call.')
         self._callback = callback
         self._called_url = self._host + command.handler
         body = command.data
-        request = tornadolib.HTTPRequest(self._called_url, method='POST',
+        request = tornado_client.HTTPRequest(self._called_url, method='POST',
                 body=body, headers={'content-type': command.content_type},
                 auth_username=self._user, auth_password=self._password,
                 request_timeout=self._timeout)
-        h = tornadolib.AsyncHTTPClient(max_clients=self._max_clients)
+        h = tornado_client.AsyncHTTPClient(max_clients=self._max_clients)
         h.fetch(request, self._receive_solr)
 
     def _receive_solr(self, response):
