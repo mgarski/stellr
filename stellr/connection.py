@@ -18,7 +18,6 @@ import json
 import platform
 
 DEFAULT_TIMEOUT = 30
-TIMEOUT_MSG = "HTTP 599: Operation timed out"
 
 try:
     import tornado.httpclient as tornado_client
