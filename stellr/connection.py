@@ -36,7 +36,7 @@ class StellrError(Exception):
         url: the url that was called
         timeout: a boolean indicating whether a timeout occurred
         code: the http error code received from the remote host, or if less
-        than 0 the remote host was never called
+            than 0 the remote host was never called
     """
     def __init__(self, message, url=None, timeout=False, code=-1):
         super(Exception, self).__init__()
@@ -50,27 +50,43 @@ class StellrError(Exception):
 
 class StellrResponse(object):
     """
+    The reponse that is returned from the execution of a blocking connection,
+    or passed as the parameter to the callback on a non-blocking connection.
+    This class has two properties:
 
+        body: the body of the response from the remote host
+        error: set to an instance of StellrError if an error is encountered
+            during the execution of a non-blocking call
     """
     def __init__(self, body=None, error=None):
         self.body = body
         self.error = error
 
 class Connection(object):
+    """
+    A Connection object will make the connection to the remote host.
+    If the application is being run in the context of Tornado's IOLoop a
+    command can be executed with the execute_non_blocking method, otherwise
+    the execute method must be used to execute the command using httplib.
+
+    Initialization parameters:
+        host: the ip/host name of the remote host (REQUIRED)
+        port: the port used to communicate to the host over (default=8983)
+        user: the username to use for basic authentication (default=None)
+        password: the password to use for basic authentication (default=None)
+        timeout: the timeout value to use (in seconds, default=30)
+        max_clients: the maximum number of non-blocking calls to have at any
+            time (default=10)
+
+    NOTE: the timeout will not be honored with a blocking connection on Mac OSX as
+    sporadic socket errors will ensue.
+    """
     def __init__(self, host, port=8983, user=None, password=None,
                  timeout=DEFAULT_TIMEOUT, max_clients=10):
-        """Create a instance of an object that will make the connection
-        to the remote host. If the application is being run in the context
-        of Tornado's IOLoop the connection will be non-blocking, otherwise
-        the connection made will be a blocking connection using httplib. The
-        timeout will not be honored with a blocking connection on Mac OSX as
-        sporadic socket errors will ensue.
-        """
         self._is_non_blocking = tornado_loop \
             and tornado_loop.IOLoop.initialized() \
             and tornado_loop.IOLoop.running()
-        if not self.is_non_blocking():
-            host = host.lstrip('http://')
+        host = host.lstrip('http://')
         self._host = '%s:%i' % (host.rstrip('/'), port)
         self._user = user
         self._password = password
@@ -142,7 +158,7 @@ class Connection(object):
             raise StellrError('No IOLoop context found '
                               'to make non-blocking call.')
         self._callback = callback
-        self._called_url = self._host + command.handler
+        self._called_url = 'http://' + self._host + command.handler
         body = command.data
         request = tornado_client.HTTPRequest(self._called_url, method='POST',
                 body=body, headers={'content-type': command.content_type},
