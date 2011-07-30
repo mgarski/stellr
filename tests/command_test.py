@@ -12,16 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-import platform
-import subprocess
-import time
 import unittest
 
-import tornado.httpserver
-import tornado.ioloop
-import tornado.web
-
-import stellr
+import stellr.command as command
 
 HDR_CONTENT_TYPE = 'Content-Type'
 HDR_JSON = 'application/json'
@@ -36,16 +29,19 @@ DOCUMENTS = [
 
 FIELDS = ['field1', 'field2', 'listField']
 
-class MockObject(object):
+class SimpleObject(object):
+    """Simple object used in testing addition of documents."""
     def __init__(self, field1, field2, listField):
         self.field1 = field1
         self.field2 = field2
         self.listField = listField
 
 class StellrCommandTest(unittest.TestCase):
+    """Perform tests on the stellr.command module."""
 
-    def test_query_command(self):
-        q = stellr.QueryCommand(handler='/solr/test/search/')
+    def test_select_command(self):
+        """Test the SelectCommand."""
+        q = command.SelectCommand(handler='/solr/test/search/')
         self.assertEqual(q.handler, '/solr/test/search?wt=json')
 
         self._add_query_params(q, CLAUSES)
@@ -57,28 +53,30 @@ class StellrCommandTest(unittest.TestCase):
         self.assertEqual(len(q._commands), 0)
 
     def test_update(self):
-        u = stellr.UpdateCommand(commit_within=60000)
+        """Test the UpdateCommand with document updates."""
+        u = command.UpdateCommand(commit_within=60000)
         self.assertEqual(u.handler, ('/solr/update/json?'
                                      'wt=json&commitWithin=60000'))
 
-        a = MockObject(DOCUMENTS[0][0], DOCUMENTS[0][1], DOCUMENTS[0][2])
-        u.add_update(a)
+        a = SimpleObject(DOCUMENTS[0][0], DOCUMENTS[0][1], DOCUMENTS[0][2])
+        u.add_documents(a)
 
         b = dict()
         for i, field in enumerate(FIELDS):
             b[field] = DOCUMENTS[1][i]
-        u.add_update(b)
+        u.add_documents(b)
 
         self.assertEqual(len(u._commands), 2)
-        for i, command in enumerate(u._commands):
-            self.assertEqual(command[0], 'add')
-            self.assertTrue('doc' in command[1])
-            for field, value in command[1]['doc'].iteritems():
+        for i, comm in enumerate(u._commands):
+            self.assertEqual(comm[0], 'add')
+            self.assertTrue('doc' in comm[1])
+            for field, value in comm[1]['doc'].iteritems():
                 field_ord = FIELDS.index(field)
                 self.assertEqual(DOCUMENTS[i][field_ord], value)
 
     def test_delete(self):
-        u = stellr.UpdateCommand()
+        """Test the UpdateCommand with deletes."""
+        u = command.UpdateCommand()
         u.add_delete_by_id(0)
         u.add_delete_by_id([1, 2])
         self.assertTrue(len(u._commands), 3)
@@ -94,7 +92,8 @@ class StellrCommandTest(unittest.TestCase):
                                        {'query': 'field1:value' + str(i)}))
 
     def test_commit(self):
-        u = stellr.UpdateCommand(commit=True)
+        """Test adding or specifying a commit on a command."""
+        u = command.UpdateCommand(commit=True)
         self.assertEqual(u.handler, '/solr/update/json?wt=json&commit=true')
 
         u.add_commit()
@@ -102,7 +101,8 @@ class StellrCommandTest(unittest.TestCase):
         self.assertEqual(('commit', {}), u._commands[0])
 
     def test_optimize(self):
-        u = stellr.UpdateCommand()
+        """Test adding an optimize operation to a command."""
+        u = command.UpdateCommand()
 
         u.add_optimize()
         self.assertEqual(len(u._commands), 1)

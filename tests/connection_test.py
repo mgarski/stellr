@@ -13,13 +13,7 @@
 #   limitations under the License.
 
 import platform
-import subprocess
-import time
 import unittest
-
-import tornado.httpserver
-import tornado.ioloop
-import tornado.web
 
 import stellr
 
@@ -37,6 +31,7 @@ DOCUMENTS = [
 FIELDS = ['field1', 'field2', 'listField']
 
 class StellrConnectionTest(unittest.TestCase):
+    """Test the stellr.connection module."""
 
     def test_blocking_connection(self):
         conn = stellr.BlockingConnection(TEST_HOST)
