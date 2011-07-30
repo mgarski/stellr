@@ -121,6 +121,9 @@ class UpdateCommand(BaseCommand):
         Boosting a specific field on a document is done by setting the value
         of a field to the dictionary:
             { 'value': <field value>, 'boost': <boost value>}
+
+        For fields that make use of the date and time, specify the field value
+        as a string in UTC format: YYYY-MM-DDTHH:MM:SSZ
         """
         if isinstance(data, dict):
             self._append_update(data, boost)
