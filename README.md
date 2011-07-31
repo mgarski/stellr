@@ -6,18 +6,15 @@ A Python API for Solr that supports non-blocking calls made running in a Tornado
 Requirements
 ------------
 
-* Python 2.6 for json library.
-* Run in the context of a Tornado IOLoop for non-blocking calls
-* The Tornado library is only needed to run the unit tests, the blocking calls will work fine with only the standard library
-* Solr 3.1+ as updates use the JSON update handler http://wiki.apache.org/solr/UpdateJSON.
+* Requires and is tested on Python 2.6; the standard library's json module is used.
+* Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
+* The following packages are required for running the unit tests: tornado, eventlet, nose, & mock.
+* An instance of Solr 3.1+ running with the example schema and data are required to execute the integration tests.
 
 Notes
 -----
-* All calls to Solr are made with wt=json.
-* Basic authentication is supported on all requests.
+* All calls to Solr are made with the parameters wt=json with the response parsed by the standard library's json module.
 * A timeout in seconds may be set on each call, defaulting to 30 seconds. If a timeout is encountered the timeout property on the StellrError raised will be True.
-* Field or document boosting is not yet supported.
-* Timeout for a blocking connection on Mac is currently not supported due to issues with sporadic 'socket.error: [Errno 35] Resource temporarily unavailable' when a timeout is set.
 
 Usage
 -----
@@ -28,10 +25,10 @@ Usage
 * Create a command object
 * Pass the command to the connection, catching any StellrError raised
 
-### Blocking Calls
+### Standard Calls (using urllib)
 
-    conn = stellr.BlockingConnection(<hostname>)
-    query = stellr.QueryCommand(handler='/query')
+    conn = stellr.StandardConnection(<hostname>)
+    query = stellr.SelectCommand(handler='/query')
     query.add_param('q', 'a')
 
     try:
@@ -39,13 +36,31 @@ Usage
     except stellr.StellrError as e:
         # handle appropriately
 
-### Tornado Async Calls
+### Eventlet Non-Blocking Calls
+
+The EventletConnection constructor will raise a StellrError if the eventlet module cannot be imported.
+
+    pool = eventlet.GreenPool()
+
+    conn = stellr.StandardConnection(<hostname>)
+    query = stellr.SelectCommand(handler='/query')
+    query.add_param('q', 'a')
+
+    try:
+        green_thread = pool.spawn(conn.execute(query))
+        response = green_thread.wait()
+    except stellr.StellrError as e:
+        # handle appropriately
+
+### Tornado Non-Blocking Calls
+
+The TornadoConnection constructor will raise a StellrError if the tornado modules cannot be imported or the IOLoop is not created or initialized.
 
 In your Tornado handler, follow the pattern below:
 
     def get(self):
-        conn = stellr.TornadoConnection(<hostname>)
-        query = stellr.QueryCommand(handler='/query')
+        conn = stellr.connection.TornadoConnection(<hostname>)
+        query = stellr.command.SelectCommand(handler='/query')
         query.add_param('q', 'a')
         conn.execute(query, self._handle_response)
 
@@ -57,9 +72,6 @@ In your Tornado handler, follow the pattern below:
 
 To Do
 -----
-
-Test BlockingConnection timeout on Linux
-Switch to httplib2 for blocking call timeouts?
-Docstrings
-Setup
-
+* Connection unit tests with Mock
+* Integration tests with Solr's example schema and data
+* Setup
