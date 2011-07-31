@@ -12,6 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+from nose.tools import raises
 import unittest
 
 import stellr.command as command
@@ -38,6 +39,12 @@ class SimpleObject(object):
 
 class StellrCommandTest(unittest.TestCase):
     """Perform tests on the stellr.command module."""
+
+    @raises(NotImplementedError)
+    def test_bad_child(self):
+        """Test an incorrectly subclassed command throws an error"""
+        c = command.BaseCommand('spam', 'eggs')
+        return c.data
 
     def test_select_command(self):
         """Test the SelectCommand."""
@@ -74,6 +81,29 @@ class StellrCommandTest(unittest.TestCase):
                 field_ord = FIELDS.index(field)
                 self.assertEqual(DOCUMENTS[i][field_ord], value)
 
+    def test_update_list(self):
+        """Test the UpdateCommand with a list of updates."""
+        u = command.UpdateCommand()
+        docs = [{'a': 1}, {'b': 2}]
+        u.add_documents(docs)
+        self.assertEqual(2, len(u._commands))
+        self.assertEqual(u.data,
+                         ('{"add": {"doc": {"a": 1}}'
+                          ',"add": {"doc": {"b": 2}}}'))
+
+    def test_update_with_document_boost(self):
+        """Test the UpdateCommand with a document boost."""
+        u = command.UpdateCommand()
+        u.add_documents({'a': 1}, boost=2.0)
+        self.assertEqual(u.data, '{"add": {"doc": {"a": 1}, "boost": 2.0}}')
+
+    def test_update_with_field_boost(self):
+        """Test the UpdateCommand with a document containing a field boost."""
+        u = command.UpdateCommand()
+        u.add_documents({'a': { 'value': 'f', 'boost': 2.0}})
+        self.assertEqual(u.data, ('{"add": {"doc": {"a": '
+                                  '{"boost": 2.0, "value": "f"}}}}'))
+
     def test_delete(self):
         """Test the UpdateCommand with deletes."""
         u = command.UpdateCommand()
@@ -82,14 +112,22 @@ class StellrCommandTest(unittest.TestCase):
         self.assertTrue(len(u._commands), 3)
         for i, delete in enumerate(u._commands):
             self.assertEquals(delete, ('delete', {'id': i}))
+        self.assertEqual(u.data,
+                         ('{"delete": {"id": 0},"delete": {"id": 1}'
+                          ',"delete": {"id": 2}}'))
 
         u.clear_command()
+        self.assertEqual(0, len(u._commands))
         u.add_delete_by_query('field1:value0')
         u.add_delete_by_query(['field1:value1', 'field1:value2'])
         self.assertTrue(len(u._commands), 3)
         for i, delete in enumerate(u._commands):
             self.assertEquals(delete, ('delete',
                                        {'query': 'field1:value' + str(i)}))
+        self.assertEqual(u.data,
+                         ('{"delete": {"query": "field1:value0"}'
+                          ',"delete": {"query": "field1:value1"}'
+                          ',"delete": {"query": "field1:value2"}}'))
 
     def test_commit(self):
         """Test adding or specifying a commit on a command."""
@@ -99,6 +137,7 @@ class StellrCommandTest(unittest.TestCase):
         u.add_commit()
         self.assertEqual(len(u._commands), 1)
         self.assertEqual(('commit', {}), u._commands[0])
+        self.assertEqual(u.data, '{"commit": {}}')
 
     def test_optimize(self):
         """Test adding an optimize operation to a command."""
@@ -107,6 +146,7 @@ class StellrCommandTest(unittest.TestCase):
         u.add_optimize()
         self.assertEqual(len(u._commands), 1)
         self.assertTrue('optimize' in u._commands[0])
+        self.assertEqual(u.data, '{"optimize": {}}')
 
     def _add_query_params(self, command, params):
         for param in params:
