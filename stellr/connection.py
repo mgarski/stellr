@@ -19,7 +19,6 @@ try:
     from eventlet.green import httplib
     from eventlet.green import urllib2
     import eventlet
-    pool = eventlet.GreenPool()
 except ImportError:
     # fall back to 'non-greened' libs
     import httplib
