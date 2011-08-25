@@ -111,10 +111,15 @@ class StellrCommandTest(unittest.TestCase):
         u.add_delete_by_id([1, 2])
         self.assertTrue(len(u._commands), 3)
         for i, delete in enumerate(u._commands):
-            self.assertEquals(delete, ('delete', {'id': i}))
+            self.assertEquals(delete, ('delete', {'id': str(i)}))
         self.assertEqual(u.data,
-                         ('{"delete": {"id": 0},"delete": {"id": 1}'
-                          ',"delete": {"id": 2}}'))
+                         ('{"delete": {"id": "0"},"delete": {"id": "1"}'
+                          ',"delete": {"id": "2"}}'))
+
+        u.clear_command()
+        u.add_delete_by_id(0)
+        self.assertTrue(len(u._commands), 1)
+        self.assertEqual(u.data, '{"delete": {"id": "0"}}')
 
         u.clear_command()
         self.assertEqual(0, len(u._commands))

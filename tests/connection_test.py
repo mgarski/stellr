@@ -12,7 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-import mock
+from mock import patch, Mock
+from eventlet.green import urllib2
+import simplejson as json
 import unittest
 
 import stellr.command as s_comm
@@ -34,77 +36,158 @@ FIELDS = ['field1', 'field2', 'listField']
 class StellrConnectionTest(unittest.TestCase):
     """Test the stellr.connection module."""
 
+    def setUp(self):
+        """Set up the patched libs."""
+        self.req_patch = patch('eventlet.green.urllib2.Request')
+        self.mock_req = self.req_patch.start()
+        self.mock_req_ret = Mock()
+        self.mock_req.return_value = self.mock_req_ret
+
+        self.urlopen_patch = patch('eventlet.green.urllib2.urlopen')
+        self.mock_urlopen = self.urlopen_patch.start()
+        response = Mock()
+        response.read.return_value = json.dumps({'response': {'q': 'a'}})
+        self.mock_urlopen.return_value = response
+
+
+    def tearDown(self):
+        """Tear down the patches."""
+        self.urlopen_patch.stop()
+        self.req_patch.stop()
+
     def test_standard_connection(self):
         """Test the StandardConnection."""
         conn = s_conn.StandardConnection(TEST_HOST)
+        self.assertEquals(TEST_HOST, conn._address)
+        self.assertEquals(s_conn.DEFAULT_TIMEOUT, conn._timeout)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
 
         response = conn.execute(query)
-        self.assertEquals(response['response']['q'], ['a'])
+        self.assertEquals(response['response']['q'], 'a')
+        self.mock_req.assert_called_once_with(TEST_HOST + '/query?wt=json')
+        self.mock_req.add_header.called_once_with('content-type',
+                                                  'application/json')
+        self.mock_urlopen.assert_called_once_with(
+            self.mock_req_ret, 'q=a', 30)
 
     def test_standard_connection_timeout(self):
         """Test the StandardConnection with a timeout."""
         conn = s_conn.StandardConnection(TEST_HOST, timeout=2)
+        self.assertEquals(TEST_HOST, conn._address)
+        self.assertEquals(2, conn._timeout)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
 
-        success = False
+        self.mock_urlopen.side_effect = urllib2.URLError(
+            'the call timed out to the server')
         try:
             conn.execute(query)
-            success = True
         except s_conn.StellrError as e:
             self.assertTrue(e.timeout)
-
-        self.assertFalse(success)
+        else:
+            self.fail(msg='No exception raised in timeout.')
 
     def test_standard_connection_error(self):
         """Test the StandardConnection with an error."""
         conn = s_conn.StandardConnection(TEST_HOST)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
 
-        response = conn.execute(query)
-        self.assertEquals(response['response']['q'], ['a'])
+        # http-related error
+        self.mock_urlopen.side_effect = urllib2.HTTPError(
+            'url', 404, 'error', {}, open(__file__))
+        try:
+            conn.execute(query)
+        except s_conn.StellrError as e:
+            self.assertFalse(e.timeout)
+        else:
+            self.fail(msg='No exception raised.')
 
-    def test_standard_connection_parsing_error(self):
+        # non-timeout URLError
+        self.mock_urlopen.side_effect = urllib2.URLError(
+            'this is a non-timeout error')
+        try:
+            conn.execute(query)
+        except s_conn.StellrError as e:
+            self.assertFalse(e.timeout)
+        else:
+            self.fail(msg='No exception raised.')
+
+    @patch('simplejson.loads')
+    def test_standard_connection_parsing_error(self, mock_json):
         """Test the StandardConnection with a JSON parsing error."""
         conn = s_conn.StandardConnection(TEST_HOST)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
 
-        response = conn.execute(query)
-        self.assertEquals(response['response']['q'], ['a'])
+        mock_json.side_effect = Exception('error')
+        try:
+            response = conn.execute(query)
+        except s_conn.StellrError as e:
+            self.assertEquals(e.message, 'Unexpected error encountered.')
+        else:
+            self.fail(msg='No exception raised.')
 
     def test_eventlet_connection(self):
         """Test the EventletConnection."""
         conn = s_conn.EventletConnection(TEST_HOST)
+        self.assertEquals(TEST_HOST, conn._address)
+        self.assertEquals(s_conn.DEFAULT_TIMEOUT, conn._timeout)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
 
         response = conn.execute(query)
-        self.assertEquals(response['response']['q'], ['a'])
+        self.assertEquals(response[0], query)
+        self.assertEquals(response[1]['response']['q'], 'a')
+        self.mock_req.assert_called_once_with(TEST_HOST + '/query?wt=json')
+        self.mock_req.add_header.called_once_with('content-type',
+                                                  'application/json')
+        self.mock_urlopen.assert_called_once_with(
+            self.mock_req_ret, 'q=a', 30)
 
-    def test_tornado_connection(self):
+    @patch('tornado.httpclient')
+    def test_tornado_connection(self, t_mock):
         """Test the TornadoConnection."""
         conn = s_conn.TornadoConnection(TEST_HOST, max_clients=2)
+        self.assertEquals(TEST_HOST, conn._address)
+        self.assertEquals(s_conn.DEFAULT_TIMEOUT, conn._timeout)
+        self.assertEquals(2, conn._max_clients)
+
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
+
+        #TODO: mock tornado
         conn.execute(query, self._handle_response)
         self.assertTrue(False)
 
     def test_tornado_connection_timeout(self):
         """Test the TornadoConnection with a timeout."""
         conn = s_conn.TornadoConnection(TEST_HOST, timeout=2)
+        self.assertEquals(TEST_HOST, conn._address)
+        self.assertEquals(2, conn._timeout)
+        self.assertEquals(s_conn.DEFAULT_MAX_TORNADO_CLIENTS,
+                          conn._max_clients)
+
+        #TODO: mock command object
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
         query.add_param('s', '3')
+
+        #TODO: mock tornado
         conn.execute(query, self._handle_timeout)
         self.assertTrue(False)
 
     def test_tornado_connection_error(self):
         """Test the TornadoConnection with an error."""
         conn = s_conn.TornadoConnection(TEST_HOST, timeout=2)
+
+        #TODO: mock command object
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
         query.add_param('s', '3')
@@ -114,9 +197,13 @@ class StellrConnectionTest(unittest.TestCase):
     def test_tornado_connection_parsing_error(self):
         """Test the TornadoConnection with a JSON parsing error."""
         conn = s_conn.TornadoConnection(TEST_HOST, timeout=2)
+
+        #TODO: mock command object
         query = s_comm.SelectCommand(handler='/query')
         query.add_param('q', 'a')
         query.add_param('s', '3')
+
+        #TODO: mock tornado
         conn.execute(query, self._handle_timeout)
         self.assertTrue(False)
 

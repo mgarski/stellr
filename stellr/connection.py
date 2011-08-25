@@ -12,7 +12,11 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-import json
+# try simplejson first for the performance benefits
+try:
+    import simplejson as json
+except ImportError:
+    import json
 
 # try importing the eventlet 'greened' libs
 try:
@@ -34,6 +38,7 @@ except ImportError:
     tornado_loop = None
 
 DEFAULT_TIMEOUT = 30
+DEFAULT_MAX_TORNADO_CLIENTS = 10
 
 class StellrError(Exception):
     """
@@ -169,7 +174,8 @@ class TornadoConnection(BaseConnection):
         max_clients: the maximum number of non-blocking calls to have at any
             time (default=10)
     """
-    def __init__(self, address, timeout=DEFAULT_TIMEOUT, max_clients=10):
+    def __init__(self, address, timeout=DEFAULT_TIMEOUT,
+                 max_clients=DEFAULT_MAX_TORNADO_CLIENTS):
         if not tornado_loop \
             and not tornado_loop.IOLoop.initialized() \
             and not tornado_loop.IOLoop.instance().running():

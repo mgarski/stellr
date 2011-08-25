@@ -165,7 +165,7 @@ class UpdateCommand(BaseCommand):
             self._append_delete('query', data)
 
     def _append_delete(self, delete_type, data):
-        self._commands.append(('delete', {delete_type: data}))
+        self._commands.append(('delete', {delete_type: str(data)}))
 
     def add_commit(self):
         """
