@@ -6,7 +6,8 @@ A Python API for Solr that supports non-blocking calls made running in a Tornado
 Requirements
 ------------
 
-* Requires and is tested on Python 2.6; the standard library's json module is used.
+* Developed and tested on Python 2.6.
+* Uses simplejson and falls back to the standard library's json module if it is not available.
 * Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
 * The following packages are required for running the unit tests: tornado, eventlet, nose, & mock.
 * An instance of Solr 3.1+ running with the example schema and data are required to execute the integration tests.
