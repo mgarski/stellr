@@ -73,6 +73,6 @@ In your Tornado handler, follow the pattern below:
 
 To Do
 -----
-* Connection unit tests with Mock
+* TornadoConnection unit tests with Mock
 * Integration tests with Solr's example schema and data
 * Setup
