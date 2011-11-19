@@ -116,16 +116,17 @@ class StandardConnection(BaseConnection):
         data = command.data
         try:
             response = urllib2.urlopen(request, data, self._timeout)
-            return json.loads(response.read())
+            return json.load(response)
         except urllib2.HTTPError as e:
+            print url
             raise StellrError(self._build_err_msg(e.code), url, code=e.code)
         except urllib2.URLError as e:
             if str(e.reason).find('timed out') >= 0:
                 raise StellrError(self._build_err_msg(504), url, True, 504)
             else:
                 raise StellrError(e.reason, url)
-        except:
-            raise StellrError('Unexpected error encountered.', url)
+        except Exception as e:
+            raise StellrError('Unexpected error encountered: %s.' % e, url)
 
 class EventletConnection(StandardConnection):
     """
