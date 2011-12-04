@@ -12,7 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import datetime
 from nose.tools import raises
+import simplejson as json
 import unittest
 
 import stellr.command as command
@@ -156,3 +158,17 @@ class StellrCommandTest(unittest.TestCase):
     def _add_query_params(self, command, params):
         for param in params:
             command.add_param(param[0], param[1])
+
+class StellrJSONEncoderTest(unittest.TestCase):
+    """Test the JSON encoder."""
+
+    def test_datetime_encoding(self):
+        """Test the JSON encoder for datetime instances."""
+        data = {
+            'date': datetime.datetime(1970, 2, 3, 11, 20, 42),
+            'int': 4,
+            'str': 'string'
+        }
+        s = json.dumps(data, cls=command.StellrJSONEncoder)
+        self.assertEqual(
+            s, '{"date": "1970-02-03T11:20:42Z", "int": 4, "str": "string"}')

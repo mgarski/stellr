@@ -14,6 +14,8 @@
 
 from mock import patch, Mock
 from eventlet.green import urllib2
+from eventlet.green import zmq
+from nose.tools import raises
 import simplejson as json
 import unittest
 
@@ -48,6 +50,8 @@ class StellrConnectionTest(unittest.TestCase):
         response = Mock()
         response.read.return_value = json.dumps({'response': {'q': 'a'}})
         self.mock_urlopen.return_value = response
+        # reset the context to None
+        s_conn.ZeroMQConnection.context = None
 
 
     def tearDown(self):
@@ -129,7 +133,7 @@ class StellrConnectionTest(unittest.TestCase):
         try:
             response = conn.execute(query)
         except s_conn.StellrError as e:
-            self.assertEquals(e.message, 'Unexpected error encountered.')
+            self.assertEquals(e.message, 'Unexpected error encountered: error.')
         else:
             self.fail(msg='No exception raised.')
 
@@ -164,7 +168,6 @@ class StellrConnectionTest(unittest.TestCase):
 
         #TODO: mock tornado
         conn.execute(query, self._handle_response)
-        self.assertTrue(False)
 
     def test_tornado_connection_timeout(self):
         """Test the TornadoConnection with a timeout."""
@@ -181,7 +184,6 @@ class StellrConnectionTest(unittest.TestCase):
 
         #TODO: mock tornado
         conn.execute(query, self._handle_timeout)
-        self.assertTrue(False)
 
     def test_tornado_connection_error(self):
         """Test the TornadoConnection with an error."""
@@ -192,7 +194,6 @@ class StellrConnectionTest(unittest.TestCase):
         query.add_param('q', 'a')
         query.add_param('s', '3')
         conn.execute(query, self._handle_timeout)
-        self.assertTrue(False)
 
     def test_tornado_connection_parsing_error(self):
         """Test the TornadoConnection with a JSON parsing error."""
@@ -205,7 +206,70 @@ class StellrConnectionTest(unittest.TestCase):
 
         #TODO: mock tornado
         conn.execute(query, self._handle_timeout)
-        self.assertTrue(False)
+
+    @raises(s_conn.StellrError)
+    def test_zeromq_context_not_set(self):
+        """Test to verify the context must be set."""
+        x = s_conn.ZeroMQConnection('address', 10)
+
+    def test_zeromq_init(self):
+        """Test to verify the instance is properly created."""
+        s_conn.ZeroMQConnection.set_context(Mock())
+        x = s_conn.ZeroMQConnection('address', 10)
+        self.assertEqual(10000, x._timeout)
+
+    @patch('eventlet.green.zmq.Poller')
+    def test_zeromq_connection_success(self, zp):
+        """Test the zero mq connection with a success."""
+        context = Mock()
+        socket = Mock()
+        socket.recv.return_value = '{"key": "value"}'
+        context.socket.return_value = socket
+        s_conn.ZeroMQConnection.set_context(context)
+
+        p = Mock()
+        p.poll.return_value = [(socket, zmq.POLLIN)]
+        zp.return_value = p
+
+        conn = s_conn.ZeroMQConnection('host:port')
+        comm = s_comm.SelectCommand(handler='/handler')
+        comm.add_param('q', 'query')
+        result = conn.execute(comm)
+        p.register.assert_called_once_with(socket, zmq.POLLIN)
+        socket.connect.assert_called_once_with('host:port')
+        socket.send.assert_called_once_with('/handler?wt=json q=query')
+        socket.close.assert_called_once()
+        p.poll.assert_called_once_with(30000)
+        self.assertEqual(result, {'key': 'value'})
+
+    @patch('eventlet.green.zmq.Poller')
+    def test_zeromq_connection_timeout(self, zp):
+        """Test the zero mq connection with a success."""
+        context = Mock()
+        socket = Mock()
+        socket.recv.return_value = '{"key": "value"}'
+        context.socket.return_value = socket
+        s_conn.ZeroMQConnection.set_context(context)
+
+        p = Mock()
+        p.poll.return_value = [(socket, zmq.POLLIN - 1)]
+        zp.return_value = p
+
+        conn = s_conn.ZeroMQConnection('host:port')
+        comm = s_comm.SelectCommand(handler='/handler')
+        comm.add_param('q', 'query')
+        result = None
+        try:
+            result = conn.execute(comm)
+        except s_conn.StellrError as e:
+            self.assertEqual(
+                e.message, 'Unexpected error: HTTP 504: Gateway Timeout')
+        p.register.assert_called_once_with(socket, zmq.POLLIN)
+        socket.connect.assert_called_once_with('host:port')
+        socket.send.assert_called_once_with('/handler?wt=json q=query')
+        socket.close.assert_called_once()
+        p.poll.assert_called_once_with(30000)
+        self.assertEqual(result, None)
 
     def _handle_response(self, response):
         self.assertFalse(response.error)

@@ -13,8 +13,14 @@
 #   limitations under the License.
 
 from cStringIO import StringIO
-import json
+import datetime
 import urllib
+
+# try simplejson first for the performance benefits
+try:
+    import simplejson as json
+except ImportError:
+    import json
 
 CONTENT_FORM = 'application/x-www-form-urlencoded; charset=utf-8'
 CONTENT_JSON = 'application/json; charset=utf-8'
@@ -30,9 +36,9 @@ class BaseCommand(object):
     """
     def __init__(self, handler, content_type):
         self._handler = '/' + handler.lstrip('/').rstrip('/')
-        self._query_string = [('wt', 'json')]
         self.content_type =  content_type
         self._commands = list()
+        self._query_string = [('wt', 'json')]
 
     @property
     def data(self):
@@ -87,13 +93,15 @@ class UpdateCommand(BaseCommand):
         """
         The data posted to the remote host in the format specified at
         http://wiki.apache.org/solr/UpdateJSON. Duplicate names are valid JSON
-        (http://www.ietf.org/rfc/rfc4627.txt section 2.2).
+        (http://www.ietf.org/rfc/rfc4627.txt section 2.2) but not in a
+        dictionary.
         """
         writer = StringIO()
         writer.write('{')
         for i in range(len(self._commands)):
             command = self._commands[i]
-            writer.write('"%s": %s' % (command[0], json.dumps(command[1])))
+            body = json.dumps(command[1], cls=StellrJSONEncoder)
+            writer.write('"%s": %s' % (command[0], body))
             if i != len(self._commands) - 1:
                 writer.write(',')
         writer.write('}')
@@ -206,3 +214,18 @@ class SelectCommand(BaseCommand):
         string of key=value pairs delimited by &.
         """
         return urllib.urlencode(self._commands)
+
+class StellrJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that encodes datetime instances into the UTC format
+    expected by Solr: YYYY-MM-DDTHH:MM:SSZ. Date formatting precision is only
+    to the second.
+    """
+
+    def default(self, o):
+        """
+        Encode! Any datetime instance is expected to be in UTC.
+        """
+        if isinstance(o, datetime.datetime):
+            return o.strftime('%Y-%m-%dT%H:%M:%SZ')
+        return json.JSONEncoder.default(self, o)

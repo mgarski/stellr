@@ -37,6 +37,14 @@ except ImportError:
     tornado_client = None
     tornado_loop = None
 
+# try importing the zmq greened for eventlet
+try:
+    from eventlet.green import zmq
+    import eventlet
+except ImportError:
+    zmq = None
+    eventlet = None
+
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAX_TORNADO_CLIENTS = 10
 
@@ -227,3 +235,53 @@ class TornadoConnection(BaseConnection):
                     'Response body could not be parsed: %s' % e,
                     url=self._called_url)
         self._callback(sr)
+
+class ZeroMQConnection(BaseConnection):
+    """
+    The ZeroMQConnection will execute the command using a ZeroMQ connection
+    in a request-reply pattern. A new ZeroMQ socket will be created for every
+    request.
+    """
+    context = None
+
+    @classmethod
+    def set_context(cls, context):
+        """
+        Set the ZeroMQ context, needs to be done once when the application
+        starts up.
+        """
+        ZeroMQConnection.context = context
+
+    def __init__(self, address, timeout=DEFAULT_TIMEOUT):
+        """
+        Create a ZeroMQ connection instance to connect to the specified
+        address, with an optional execution timeout in seconds. If not
+        specified the timeout defaults to 30 seconds.
+        """
+        if not zmq:
+            raise StellrError("ZeroMQ libs not imported or present.")
+        if not ZeroMQConnection.context:
+            raise StellrError('The ZeroMQ context is not set.')
+        super(ZeroMQConnection, self).__init__(address, timeout * 1000)
+
+    def execute(self, command):
+        """
+        Execute the command (more detail on how command is formatted).
+        """
+        socket = ZeroMQConnection.context.socket(zmq.REQ)
+        socket.connect(self._address)
+        poll = zmq.Poller()
+        poll.register(socket, zmq.POLLIN)
+        socket.send('%s %s' % (command.handler, command.data))
+        p = dict(poll.poll(self._timeout))
+        try:
+            if p.get(socket) == zmq.POLLIN:
+                return json.loads(socket.recv())
+            else:
+                socket.setsockopt(zmq.LINGER, 0)
+                raise StellrError(
+                    self._build_err_msg(504), command.handler, True, 504)
+        except Exception as e:
+            raise StellrError('Unexpected error: %s' % e)
+        finally:
+            socket.close()

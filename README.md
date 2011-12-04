@@ -9,13 +9,13 @@ Requirements
 * Developed and tested on Python 2.6.
 * Uses simplejson and falls back to the standard library's json module if it is not available.
 * Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
-* The following packages are required for running the unit tests: tornado, eventlet, nose, & mock.
-* An instance of Solr 3.1+ running with the example schema and data are required to execute the integration tests.
+* The following packages are required for running the unit tests: tornado, eventlet, zmq, nose, & mock.
 
 Notes
 -----
 * All calls to Solr are made with the parameters wt=json with the response parsed by the standard library's json module.
 * A timeout in seconds may be set on each call, defaulting to 30 seconds. If a timeout is encountered the timeout property on the StellrError raised will be True.
+* Datetime instances in an UpdateCommand field are encoded in the format expected by Solr with precision in seconds.
 
 Usage
 -----
@@ -43,7 +43,7 @@ The EventletConnection constructor will raise a StellrError if the eventlet modu
 
     pool = eventlet.GreenPool()
 
-    conn = stellr.StandardConnection(<hostname>)
+    conn = stellr.EventletConnection(<hostname>)
     query = stellr.SelectCommand(handler='/query')
     query.add_param('q', 'a')
 
@@ -52,6 +52,27 @@ The EventletConnection constructor will raise a StellrError if the eventlet modu
         response = green_thread.wait()
     except stellr.StellrError as e:
         # handle appropriately
+
+### ZeroMQ w/Eventlet Non-Blocking Calls
+
+The ZeroMQConnection constructor will raise a StellrError if the zmq module cannot be imported from eventlet.green.
+
+    pool = eventlet.GreenPool()
+
+    conn = stellr.ZeroMQConnection(<hostname>)
+    query = stellr.SelectCommand(handler='/query')
+    query.add_param('q', 'a')
+
+    try:
+        green_thread = pool.spawn(conn.execute(query))
+        response = green_thread.wait()
+    except stellr.StellrError as e:
+        # handle appropriately
+
+The ZeroMQConnection sends the command to a ZeroMQ endpoint formatted with the handler and post data delimted by a space.
+The handler should not be prefaced with '/solr', but with the name of the core only. If HTTP requests are sent to the
+URL http://localhost/solr/core/search?wt=json, with the post body being q=test&rows=12, the ZeroMQ endpoint expects
+the string "/core/search?wt=json q=test&rows=12".
 
 ### Tornado Non-Blocking Calls
 
@@ -71,8 +92,5 @@ In your Tornado handler, follow the pattern below:
         else:
             # data is in response.body
 
-To Do
------
-* TornadoConnection unit tests with Mock
-* Integration tests with Solr's example schema and data
-* Setup
+NOTE: I no longer use the TornadoConnection and will not be completing the unit tests for it however I will
+gladly accept a pull request that completes the tests.
