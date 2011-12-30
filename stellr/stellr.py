@@ -97,20 +97,19 @@ class BaseCommand(object):
         response as a JSON-parsed dict or a tuple with the JSON_parsed dict
         and the command name.
         """
-        response_data = None
+        response = None
         try:
             response = self.pool.urlopen('POST', self.url, body=self.data,
                 headers=self.headers, retries=0, timeout=self.timeout)
-            response_data = response.read()
             if response.status == 200:
-                json_resp = json.loads(response_data)
+                json_resp = json.loads(response.data)
                 if return_name:
                     return json_resp, self.name
                 else:
                     return json_resp
             else:
                 raise StellrError(response.reason, url=self.url,
-                    body=self.data, response=response_data,
+                    body=self.data, response=response.data,
                     status=response.status)
         except StellrError:
             raise
@@ -118,8 +117,9 @@ class BaseCommand(object):
             msg = 'Request timed out after %s seconds.' % self.timeout
             raise StellrError(msg, url=self.url, body=self.data, timeout=True)
         except Exception as e:
+            data = None if response is None else response.data
             raise StellrError('Error: %s' % e, url=self.url, body=self.data,
-                response=response_data)
+                response=data)
 
     def _create_headers(self, content_type):
         """

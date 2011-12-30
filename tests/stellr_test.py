@@ -269,12 +269,12 @@ class StellrCommandTest(unittest.TestCase):
         response = Mock()
         pool.urlopen.return_value = response
         if valid:
-            response.read.return_value = RESPONSE_DATA
+            response.data = RESPONSE_DATA
         else:
-            response.read.return_value = INVALID_RESPONSE_DATA
+            response.data = INVALID_RESPONSE_DATA
         response.status = status
         if side:
-            response.read.side_effect = side
+            pool.urlopen.side_effect = side
         return response
 
     def _add_query_params(self, command, params):
