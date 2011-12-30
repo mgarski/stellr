@@ -14,4 +14,6 @@
 
 """The stellr solr library."""
 
-__version__ = "0.2.0"
+__version__ = '0.2.0'
+
+from .stellr import SelectCommand, StellrError, UpdateCommand
