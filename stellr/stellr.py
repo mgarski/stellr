@@ -29,7 +29,7 @@ CONTENT_JSON = 'application/json; charset=utf-8'
 DEFAULT_TIMEOUT = 15
 
 # the pool of connections
-pool = urllib3.PoolManager()
+pool = urllib3.PoolManager(maxsize=25)
 
 class StellrError(Exception):
     """
@@ -100,7 +100,8 @@ class BaseCommand(object):
         response = None
         try:
             response = self.pool.urlopen('POST', self.url, body=self.data,
-                headers=self.headers, retries=0, timeout=self.timeout)
+                headers=self.headers, retries=0, timeout=self.timeout,
+                assert_same_host=False)
             if response.status == 200:
                 json_resp = json.loads(response.data)
                 if return_name:
