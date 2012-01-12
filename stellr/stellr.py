@@ -100,7 +100,7 @@ class BaseCommand(object):
         response = None
         try:
             response = self.pool.urlopen('POST', self.url, body=self.data,
-                headers=self.headers, retries=0, timeout=self.timeout,
+                headers=self.headers, timeout=self.timeout,
                 assert_same_host=False)
             if response.status == 200:
                 json_resp = json.loads(response.data)
