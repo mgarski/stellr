@@ -185,7 +185,8 @@ class StellrCommandTest(unittest.TestCase):
                                  'charset=utf-8')}
         pool.urlopen.assert_called_once_with(
             'POST', 'http://localhost:8983/solr/select?wt=json',
-            body='fq=field%3Afilter', headers=hdrs, retries=0, timeout=15)
+            body='fq=field%3Afilter', headers=hdrs, timeout=15,
+            assert_same_host=False)
 
         self.assertEqual(len(data), 2)
         self.assertEqual(data['key'], 'value')
