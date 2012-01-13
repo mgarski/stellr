@@ -7,7 +7,8 @@ Requirements
 ------------
 
 * Developed and tested on Python 2.6.
-* urllib3, greater than 1.0.2 as that version has a bug that prevents throwing the appropriate error during a timeout.
+* urllib3, >= 1.1 (earlier versions do not raise a timeout properly).
+* eventlet, for non-blocking IO
 * Uses simplejson and falls back to the standard library's json module if it is not available.
 * Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
 * The following packages are required for running the unit tests: eventlet, nose, & mock.

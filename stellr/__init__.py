@@ -1,4 +1,4 @@
-#   Copyright 2011 Michael Garski
+#   Copyright 2011-2012 Michael Garski
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
