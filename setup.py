@@ -16,11 +16,14 @@ from distutils.core import setup
 
 setup(
     name='stellr',
-    version='0.2.0',
-    description='Solr client library for Eventlet utilizing urllib3.',
+    version='0.3.0',
+    description='Solr client library for gevent utilizing urllib3 and ZeroMQ.',
     author='Michael Garski',
     author_email='mgarski@mac.com',
-    depends='urllib3>1.0',
+    depends=['urllib3>=1.1',
+             'gevent>=0.13.6',
+             'gevent_zeromq>=0.2.2',
+             'pyzmq>=2.0.10.1'],
     url='https://github.com/mgarski/stellr',
     packages=['stellr']
 )

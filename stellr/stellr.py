@@ -11,12 +11,12 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-
+from gevent import monkey; monkey.patch_all()
 from cStringIO import StringIO
 import datetime
-import eventlet
-from eventlet.green import urllib
-urllib3 = eventlet.import_patched('urllib3')
+import urllib
+import urllib3
+from gevent_zeromq import zmq
 
 # try simplejson first
 try:
@@ -30,6 +30,7 @@ DEFAULT_TIMEOUT = 15
 
 # the pool of connections
 pool = urllib3.PoolManager(maxsize=25)
+context = zmq.Context()
 
 class StellrError(Exception):
     """
@@ -69,8 +70,8 @@ class BaseCommand(object):
     def __init__(self, host, handler, timeout, name, content_type):
         global pool
         self.pool = pool
-        self.url = '%s/%s?wt=json' % \
-                   (host.rstrip('/'), handler.lstrip('/').rstrip('/'))
+        self.host = host
+        self._handler = handler
         self.timeout = timeout
         self.name = name
         self.headers = self._create_headers(content_type)
@@ -84,7 +85,14 @@ class BaseCommand(object):
         self._commands = []
 
     @property
-    def data(self):
+    def handler(self):
+        """
+        The handler that the data is posted to.
+        """
+        raise NotImplementedError
+
+    @property
+    def body(self):
         """
         The data that is posted to the remote host, and must be implemented
         by all sub classes.
@@ -98,8 +106,11 @@ class BaseCommand(object):
         and the command name.
         """
         response = None
+        url = self.host + self.handler
+        body = self.body
         try:
-            response = self.pool.urlopen('POST', self.url, body=self.data,
+            method = 'POST' if body is not None else 'GET'
+            response = self.pool.urlopen(method, url, body=body,
                 headers=self.headers, timeout=self.timeout,
                 assert_same_host=False)
             if response.status == 200:
@@ -109,24 +120,70 @@ class BaseCommand(object):
                 else:
                     return json_resp
             else:
-                raise StellrError(response.reason, url=self.url,
-                    body=self.data, response=response.data,
-                    status=response.status)
+                raise StellrError(response.reason, url=url, body=body,
+                    response=response.data, status=response.status)
         except StellrError:
             raise
-        except urllib3.exceptions.TimeoutError:
+        except urllib3.TimeoutError:
             msg = 'Request timed out after %s seconds.' % self.timeout
-            raise StellrError(msg, url=self.url, body=self.data, timeout=True)
+            raise StellrError(msg, url=url, body=body, timeout=True)
         except Exception as e:
             data = None if response is None else response.data
-            raise StellrError('Error: %s' % e, url=self.url, body=self.data,
+            raise StellrError('Error: %s' % e, url=url, body=body,
                 response=data)
+
+    def execute_zmq(self, return_name=False):
+        """
+        Execute the command over a ZMQ socket (new instance created per call).
+        """
+        if self._handler.startswith('/solr'):
+            self._handler = self._handler.replace('/solr', '', 1)
+        socket = context.socket(zmq.REQ)
+        socket.connect(self.host)
+
+        poll = zmq.Poller()
+        poll.register(socket, zmq.POLLIN)
+        body = self.body
+        message = '%s %s' % (self.handler, body) if body else self.handler
+        try:
+            socket.send(message)
+            socks = dict(poll.poll(self.timeout * 1000))
+            if socks.get(socket) == zmq.POLLIN:
+                response = socket.recv()
+                json_resp = json.loads(response)
+                header = json_resp.get('responseHeader', None)
+                if header is None:
+                    raise StellrError('No header in response.', url=message,
+                        body=self.body, response=response)
+                status = header.get('status', -1)
+                if status < 0:
+                    raise StellrError('No status in header.', url=message,
+                        body=self.body, response=response, status=status)
+                if status > 0:
+                    raise StellrError('Error from Solr.', url=message,
+                        body=self.body, response=response, status=status)
+                if return_name:
+                    return json_resp, self.name
+                else:
+                    return json_resp
+            else:
+                socket.setsockopt(zmq.LINGER, 0)
+                raise StellrError(
+                    'Timeout calling Solr after %s seconds.' % self.timeout,
+                    url=message, timeout=True)
+        except StellrError:
+            raise
+        except Exception as ex:
+            raise StellrError('Error calling Solr: %s' % ex,
+                url=self.host + self.handler, body=body)
+        finally:
+            socket.close()
 
     def _create_headers(self, content_type):
         """
         Creates the headers for the request.
         """
-        headers = urllib3.connectionpool.make_headers(keep_alive=True)
+        headers = urllib3.make_headers(keep_alive=True)
         headers['content-type'] = content_type
         return headers
 
@@ -154,13 +211,19 @@ class UpdateCommand(BaseCommand):
                  timeout=DEFAULT_TIMEOUT, commit_within=None, commit=False):
         super(UpdateCommand, self).__init__(
             host, handler, timeout, name, CONTENT_JSON)
+        self._handler += '?wt=json'
         if commit_within is not None:
-            self.url += '&commitWithin=%s' % commit_within
+            self._handler += '&commitWithin=%s' % commit_within
         if commit:
-            self.url += '&commit=true'
+            self._handler += '&commit=true'
 
     @property
-    def data(self):
+    def handler(self):
+        """The handler for the request."""
+        return self._handler
+
+    @property
+    def body(self):
         """
         The data posted to the remote host in the format specified at
         http://wiki.apache.org/solr/UpdateJSON. Duplicate names are valid JSON
@@ -283,6 +346,7 @@ class SelectCommand(BaseCommand):
                  timeout=DEFAULT_TIMEOUT):
         super(SelectCommand, self).__init__(
             host, handler, timeout, name, CONTENT_FORM)
+        self.add_param('wt', 'json')
 
     def add_param(self, name, value):
         """
@@ -294,12 +358,19 @@ class SelectCommand(BaseCommand):
         self._commands.append((name, value.encode('utf-8')))
 
     @property
-    def data(self):
+    def handler(self):
         """
-        The data that is posted to the remote host as a string of url encoded
-        string of key=value pairs delimited by &.
+        The handler that the data is posted to along with a query string of url
+        encoded string of key=value pairs delimited by &.
         """
-        return urllib.urlencode(self._commands)
+        return '%s?%s' % (self._handler, urllib.urlencode(self._commands))
+
+    @property
+    def body(self):
+        """
+        No body is posted, just an empty string
+        """
+        return None
 
 class StellrJSONEncoder(json.JSONEncoder):
     """
