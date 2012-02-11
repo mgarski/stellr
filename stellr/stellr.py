@@ -13,6 +13,7 @@
 #   limitations under the License.
 from gevent import monkey; monkey.patch_all()
 from cStringIO import StringIO
+import gevent
 import datetime
 import urllib
 import urllib3
@@ -141,15 +142,14 @@ class BaseCommand(object):
         socket = context.socket(zmq.REQ)
         socket.connect(self.host)
 
-        poll = zmq.Poller()
-        poll.register(socket, zmq.POLLIN)
         body = self.body
         message = '%s %s' % (self.handler, body) if body else self.handler
         try:
             socket.send(message)
-            socks = dict(poll.poll(self.timeout * 1000))
-            if socks.get(socket) == zmq.POLLIN:
+            response = None
+            with gevent.Timeout(self.timeout):
                 response = socket.recv()
+            if response:
                 json_resp = json.loads(response)
                 header = json_resp.get('responseHeader', None)
                 if header is None:

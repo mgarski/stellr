@@ -13,8 +13,9 @@
 #   limitations under the License.
 
 import datetime
-from mock import patch, Mock
+from mock import patch, Mock, MagicMock
 from nose.tools import raises
+import gevent
 import simplejson as json
 import urllib3
 import unittest
@@ -208,17 +209,14 @@ class StellrCommandTest(unittest.TestCase):
         self.assertEqual(data['key'], 'value')
         self.assertEqual(data['number'], 42)
 
-    @patch('gevent_zeromq.core.Poller')
+    @patch('gevent.timeout.Timeout')
     @patch('stellr.stellr.context')
-    def test_zmq_execution_select_success(self, context, poller):
+    def test_zmq_execution_select_success(self, context, timeout):
         """
         Test the execution of a select command that is successful.
         """
         socket = self._create_zmq_execution_mocks(context)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
-
+        timeout.return_value = MagicMock(spec=gevent.Timeout)
         command = stellr.SelectCommand(TEST_HOST)
         command.add_param('fq', 'field:filter')
         data = command.execute_zmq()
@@ -226,7 +224,6 @@ class StellrCommandTest(unittest.TestCase):
         # check the mocks
         context.socket.assert_called_once_with(zmq.REQ)
         socket.connect.assert_called_once_with(TEST_HOST)
-        poll.register.assert_called_once_with(socket, zmq.POLLIN)
         socket.send.assert_called_once_with(
             '/select?wt=json&fq=field%3Afilter')
 
@@ -257,16 +254,14 @@ class StellrCommandTest(unittest.TestCase):
             body='{"add": {"doc": {"id": 69, "value": "sixty-nine"}}}',
             headers=hdrs, timeout=15, assert_same_host=False)
 
-    @patch('gevent_zeromq.core.Poller')
+    @patch('gevent.timeout.Timeout')
     @patch('stellr.stellr.context')
-    def test_zmq_execution_update_success(self, context, poller):
+    def test_zmq_execution_update_success(self, context, timeout):
         """
         Test the execution of an update command that is successful.
         """
         socket = self._create_zmq_execution_mocks(context)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
+        timeout.return_value = MagicMock(spec=gevent.Timeout)
 
         command = stellr.UpdateCommand(TEST_HOST)
         command.add_documents({'id': 69, 'value': 'sixty-nine'})
@@ -275,7 +270,6 @@ class StellrCommandTest(unittest.TestCase):
         # check the mocks
         context.socket.assert_called_once_with(zmq.REQ)
         socket.connect.assert_called_once_with(TEST_HOST)
-        poll.register.assert_called_once_with(socket, zmq.POLLIN)
         socket.send.assert_called_once_with(
             ('/update/json?wt=json '
              '{"add": {"doc": {"id": 69, "value": "sixty-nine"}}}'))
@@ -387,16 +381,15 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent_zeromq.core.Poller')
+    @patch('gevent.timeout.Timeout')
     @patch('stellr.stellr.context')
-    def test_zmq_execution_timeout(self, context, poller):
+    def test_zmq_execution_timeout(self, context, timeout):
         """
         Test the execution of a select command that is successful.
         """
         socket = self._create_zmq_execution_mocks(context)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: None})
+        timeout.return_value = MagicMock(spec=gevent.Timeout)
+        socket.recv.return_value = None
 
         command = stellr.SelectCommand(TEST_HOST)
         command.add_param('fq', 'field:filter')
