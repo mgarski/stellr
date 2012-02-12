@@ -20,7 +20,6 @@ setup(
     description='Solr client library for gevent utilizing urllib3 and ZeroMQ.',
     author='Michael Garski',
     author_email='mgarski@mac.com',
-    #TODO: is 'depends' valid? seeing warnings that it is not
     install_requires=['urllib3>=1.1',
              'gevent>=0.13.6',
              'gevent_zeromq>=0.2.2',
