@@ -1,17 +1,19 @@
 stellr
 ======
 
-A Python API for Solr that supports non-blocking calls made running in a Tornado application as well as blocking calls. The command objects provide full access to all of the parameters of an update or query and the JSON response from Solr is parsed into a nested dictionary.
+A Python API for Solr that supports non-blocking calls using gevent via urllib3 or ZeroMQ.
 
 Requirements
 ------------
 
-* Developed and tested on Python 2.6.
-* urllib3, >= 1.1 (earlier versions do not raise a timeout properly).
-* eventlet, for non-blocking IO
-* Uses simplejson and falls back to the standard library's json module if it is not available.
-* Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
-* The following packages are required for running the unit tests: eventlet, nose, & mock.
+* Developed and tested on Python 2.6 with
+** urllib3, >= 1.1 (earlier versions do not raise a timeout properly)
+** pyzmq 2.0.10.1
+** gevent 0.13.6
+** gevent_zeromq 0.2.2
+** simplejson 2.1.6
+** Use of the JSON update handler http://wiki.apache.org/solr/UpdateJSON is required with stellr.
+** Nose and mock are necessary to run the unit tests.
 
 Notes
 -----

@@ -24,7 +24,8 @@ setup(
     install_requires=['urllib3>=1.1',
              'gevent>=0.13.6',
              'gevent_zeromq>=0.2.2',
-             'pyzmq>=2.0.10.1'],
+             'pyzmq>=2.0.10.1',
+             'simplejson>=2.1.6'],
     url='https://github.com/mgarski/stellr',
     packages=['stellr']
 )
