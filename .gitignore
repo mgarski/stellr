@@ -3,5 +3,7 @@
 *.pyc
 /.coverage
 /build
+/dist
 /docs/_build
-projectFilesBackup/
+/projectFilesBackup/
+/stellr.egg-info/*

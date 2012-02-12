@@ -12,15 +12,16 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name='stellr',
-    version='0.3.0',
+    version='0.3.2',
     description='Solr client library for gevent utilizing urllib3 and ZeroMQ.',
     author='Michael Garski',
     author_email='mgarski@mac.com',
-    depends=['urllib3>=1.1',
+    #TODO: is 'depends' valid? seeing warnings that it is not
+    install_requires=['urllib3>=1.1',
              'gevent>=0.13.6',
              'gevent_zeromq>=0.2.2',
              'pyzmq>=2.0.10.1'],

@@ -13,25 +13,23 @@
 #   limitations under the License.
 from gevent import monkey; monkey.patch_all()
 from cStringIO import StringIO
-import gevent
 import datetime
+import gevent
+import gevent.queue
+import pool
+import simplejson as json
 import urllib
 import urllib3
 from gevent_zeromq import zmq
-
-# try simplejson first
-try:
-    import simplejson as json
-except ImportError:
-    import json
 
 CONTENT_FORM = 'application/x-www-form-urlencoded; charset=utf-8'
 CONTENT_JSON = 'application/json; charset=utf-8'
 DEFAULT_TIMEOUT = 15
 
 # the pool of connections
-pool = urllib3.PoolManager(maxsize=25)
+http_pool = urllib3.PoolManager(maxsize=25)
 context = zmq.Context()
+pool.zmq_socket_pool.create(context)
 
 class StellrError(Exception):
     """
@@ -69,8 +67,8 @@ class BaseCommand(object):
     """
 
     def __init__(self, host, handler, timeout, name, content_type):
-        global pool
-        self.pool = pool
+        global http_pool
+        self.pool = http_pool
         self.host = host
         self._handler = handler
         self.timeout = timeout
@@ -104,7 +102,18 @@ class BaseCommand(object):
         """
         Execute the command against the Solr instance, returning either the
         response as a JSON-parsed dict or a tuple with the JSON_parsed dict
-        and the command name.
+        and the command name. The command will be executed using urllib3 if
+        the host starts with 'http://', otherwise it will be executed using a
+        ZeroMQ socket.
+        """
+        if self.host.startswith('http://'):
+            return self._execute_http(return_name)
+        else:
+            return self._execute_zmq(return_name)
+
+    def _execute_http(self, return_name=False):
+        """
+        Execute the command against the Solr instance via http.
         """
         response = None
         url = self.host + self.handler
@@ -133,51 +142,47 @@ class BaseCommand(object):
             raise StellrError('Error: %s' % e, url=url, body=body,
                 response=data)
 
-    def execute_zmq(self, return_name=False):
+    def _execute_zmq(self, return_name=False):
         """
-        Execute the command over a ZMQ socket (new instance created per call).
+        Execute the command against the Solr instance via ZeroMQ.
         """
         if self._handler.startswith('/solr'):
             self._handler = self._handler.replace('/solr', '', 1)
-        socket = context.socket(zmq.REQ)
-        socket.connect(self.host)
-
         body = self.body
         message = '%s %s' % (self.handler, body) if body else self.handler
         try:
-            socket.send(message)
-            response = None
-            with gevent.Timeout(self.timeout):
-                response = socket.recv()
-            if response:
-                json_resp = json.loads(response)
-                header = json_resp.get('responseHeader', None)
-                if header is None:
-                    raise StellrError('No header in response.', url=message,
-                        body=self.body, response=response)
-                status = header.get('status', -1)
-                if status < 0:
-                    raise StellrError('No status in header.', url=message,
-                        body=self.body, response=response, status=status)
-                if status > 0:
-                    raise StellrError('Error from Solr.', url=message,
-                        body=self.body, response=response, status=status)
-                if return_name:
-                    return json_resp, self.name
+            with pool.zmq_socket_pool(self.host) as socket:
+                socket.send(message)
+                response = None
+                with gevent.Timeout(self.timeout):
+                    response = socket.recv()
+                if response:
+                    json_resp = json.loads(response)
+                    header = json_resp.get('responseHeader', None)
+                    if header is None:
+                        raise StellrError('No header in response.',
+                            url=message, body=self.body, response=response)
+                    status = header.get('status', -1)
+                    if status < 0:
+                        raise StellrError('No status in header.', url=message,
+                            body=self.body, response=response, status=status)
+                    if status > 0:
+                        raise StellrError('Error from Solr.', url=message,
+                            body=self.body, response=response, status=status)
+                    if return_name:
+                        return json_resp, self.name
+                    else:
+                        return json_resp
                 else:
-                    return json_resp
-            else:
-                socket.setsockopt(zmq.LINGER, 0)
-                raise StellrError(
-                    'Timeout calling Solr after %s seconds.' % self.timeout,
-                    url=message, timeout=True)
+                    socket.setsockopt(zmq.LINGER, 0)
+                    raise StellrError(
+                        'Timeout after %s seconds.' % self.timeout,
+                        url=message, timeout=True)
         except StellrError:
             raise
         except Exception as ex:
             raise StellrError('Error calling Solr: %s' % ex,
                 url=self.host + self.handler, body=body)
-        finally:
-            socket.close()
 
     def _create_headers(self, content_type):
         """

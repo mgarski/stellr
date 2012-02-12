@@ -23,7 +23,8 @@ from gevent_zeromq import zmq
 
 import stellr
 
-TEST_HOST = 'http://localhost:8983'
+TEST_HTTP = 'http://localhost:8983'
+TEST_ZMQ = 'tcp://localhost:9000'
 
 CLAUSES = [('q', 'test query'), ('sort', 'name asc')]
 
@@ -60,7 +61,7 @@ class StellrCommandTest(unittest.TestCase):
     def test_select_command(self):
         """Test the SelectCommand."""
         wt = [('wt', 'json')]
-        q = stellr.SelectCommand(TEST_HOST, handler='/solr/test/search')
+        q = stellr.SelectCommand(TEST_HTTP, handler='/solr/test/search')
         self.assertEqual(q.host, 'http://localhost:8983')
         self.assertEqual(q._handler, '/solr/test/search')
         self.assertEqual(q._commands, wt)
@@ -76,7 +77,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_update(self):
         """Test the UpdateCommand with document updates."""
-        u = stellr.UpdateCommand(TEST_HOST, commit_within=60000)
+        u = stellr.UpdateCommand(TEST_HTTP, commit_within=60000)
         self.assertEqual(u.host, 'http://localhost:8983')
         self.assertEqual(u._handler, ('/solr/update/json?'
                                       'wt=json&commitWithin=60000'))
@@ -99,7 +100,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_update_list(self):
         """Test the UpdateCommand with a list of updates."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
         docs = [{'a': 1}, {'b': 2}]
         u.add_documents(docs)
         self.assertEqual(2, len(u._commands))
@@ -109,27 +110,27 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_update_with_document_boost(self):
         """Test the UpdateCommand with a document boost."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
         u.add_documents({'a': 1}, boost=2.0)
         self.assertEqual(u.body, '{"add": {"doc": {"a": 1}, "boost": 2.0}}')
 
     def test_update_with_field_boost(self):
         """Test the UpdateCommand with a document containing a field boost."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
         u.add_documents({'a': { 'value': 'f', 'boost': 2.0}})
         self.assertEqual(u.body, ('{"add": {"doc": {"a": '
                                   '{"boost": 2.0, "value": "f"}}}}'))
 
     def test_update_with_overwrite(self):
         """Test the UpdateCommand with a value for overwrite."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
         u.add_documents({'a': 1}, overwrite=False)
         self.assertEqual(
             u.body, '{"add": {"doc": {"a": 1}, "overwrite": false}}')
 
     def test_delete(self):
         """Test the UpdateCommand with deletes."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
         u.add_delete_by_id(0)
         u.add_delete_by_id([1, 2])
         self.assertTrue(len(u._commands), 3)
@@ -159,7 +160,7 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_commit(self):
         """Test adding or specifying a commit on a command."""
-        u = stellr.UpdateCommand(TEST_HOST, commit=True)
+        u = stellr.UpdateCommand(TEST_HTTP, commit=True)
         self.assertEqual(u.host, 'http://localhost:8983')
         self.assertEqual(u._handler, '/solr/update/json?wt=json&commit=true')
 
@@ -170,19 +171,19 @@ class StellrCommandTest(unittest.TestCase):
 
     def test_optimize(self):
         """Test adding an optimize operation to a command."""
-        u = stellr.UpdateCommand(TEST_HOST)
+        u = stellr.UpdateCommand(TEST_HTTP)
 
         u.add_optimize()
         self.assertEqual(len(u._commands), 1)
         self.assertTrue('optimize' in u._commands[0])
         self.assertEqual(u.body, '{"optimize": {}}')
 
-    @patch('stellr.stellr.pool')
+    @patch('stellr.stellr.http_pool')
     def test_execution_select_success(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        command = stellr.SelectCommand(TEST_HOST, name='test select')
+        command = stellr.SelectCommand(TEST_HTTP, name='test select')
         self.assertEquals(command.pool, pool)
         response = self._create_execution_mocks(pool, 200)
 
@@ -209,37 +210,32 @@ class StellrCommandTest(unittest.TestCase):
         self.assertEqual(data['key'], 'value')
         self.assertEqual(data['number'], 42)
 
-    @patch('gevent.timeout.Timeout')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_select_success(self, context, timeout):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_select_success(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(context)
-        timeout.return_value = MagicMock(spec=gevent.Timeout)
-        command = stellr.SelectCommand(TEST_HOST)
+        s, c = self._create_zmq_execution_mocks(pool)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
-        data = command.execute_zmq()
+        data = command.execute()
 
         # check the mocks
-        context.socket.assert_called_once_with(zmq.REQ)
-        socket.connect.assert_called_once_with(TEST_HOST)
-        socket.send.assert_called_once_with(
-            '/select?wt=json&fq=field%3Afilter')
+        s.send.assert_called_once_with('/select?wt=json&fq=field%3Afilter')
 
         self.assertEqual(len(data), 2)
         self.assertEqual(data['responseHeader']['status'], 0)
 
         # verify name is returned
-        data, name = command.execute_zmq(return_name=True)
+        data, name = command.execute(return_name=True)
         self.assertEqual(name, 'select')
 
-    @patch('stellr.stellr.pool')
+    @patch('stellr.stellr.http_pool')
     def test_execution_update_success(self, pool):
         """
         Test the execution of an update command that is successful.
         """
-        command = stellr.UpdateCommand(TEST_HOST, name='test update')
+        command = stellr.UpdateCommand(TEST_HTTP, name='test update')
         self.assertEquals(command.pool, pool)
         response = self._create_execution_mocks(pool, 200)
 
@@ -254,23 +250,19 @@ class StellrCommandTest(unittest.TestCase):
             body='{"add": {"doc": {"id": 69, "value": "sixty-nine"}}}',
             headers=hdrs, timeout=15, assert_same_host=False)
 
-    @patch('gevent.timeout.Timeout')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_update_success(self, context, timeout):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_update_success(self, pool):
         """
         Test the execution of an update command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(context)
-        timeout.return_value = MagicMock(spec=gevent.Timeout)
+        s, c = self._create_zmq_execution_mocks(pool)
 
-        command = stellr.UpdateCommand(TEST_HOST)
+        command = stellr.UpdateCommand(TEST_ZMQ)
         command.add_documents({'id': 69, 'value': 'sixty-nine'})
-        data = command.execute_zmq()
+        data = command.execute()
 
         # check the mocks
-        context.socket.assert_called_once_with(zmq.REQ)
-        socket.connect.assert_called_once_with(TEST_HOST)
-        socket.send.assert_called_once_with(
+        s.send.assert_called_once_with(
             ('/update/json?wt=json '
              '{"add": {"doc": {"id": 69, "value": "sixty-nine"}}}'))
 
@@ -278,15 +270,15 @@ class StellrCommandTest(unittest.TestCase):
         self.assertEqual(data['responseHeader']['status'], 0)
 
         # verify name is returned
-        data, name = command.execute_zmq(return_name=True)
+        data, name = command.execute(return_name=True)
         self.assertEqual(name, 'update')
 
-    @patch('stellr.stellr.pool')
+    @patch('stellr.stellr.http_pool')
     def test_execution_error(self, pool):
         """
         Test the execution of a command where Solr returns a non-200 response.
         """
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_HTTP)
         self.assertEquals(command.pool, pool)
         response = self._create_execution_mocks(pool, 500)
 
@@ -297,29 +289,25 @@ class StellrCommandTest(unittest.TestCase):
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, 500)
             self.assertEqual(e.url,
-                TEST_HOST + '/solr/select?wt=json&fq=field%3Afilter')
+                TEST_HTTP + '/solr/select?wt=json&fq=field%3Afilter')
             self.assertEqual(e.body, None)
             self.assertEqual(e.response, RESPONSE_DATA)
             return
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent_zeromq.core.Poller')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_error_no_header(self, context, poller):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_error_no_header(self, pool):
         """
         Test the execution of a select command that is successful.
         """
         socket = self._create_zmq_execution_mocks(
-            context, valid=False, response=ZMQ_NO_HEADER)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
+            pool, valid=False, response=ZMQ_NO_HEADER)
 
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
         try:
-            data = command.execute_zmq()
+            data = command.execute()
         except stellr.StellrError as e:
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, -1)
@@ -330,22 +318,18 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent_zeromq.core.Poller')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_error_no_status(self, context, poller):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_error_no_status(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(
-            context, valid=False, response=ZMQ_NO_STATUS)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
+        s, c = self._create_zmq_execution_mocks(
+            pool, valid=False, response=ZMQ_NO_STATUS)
 
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
         try:
-            data = command.execute_zmq()
+            data = command.execute()
         except stellr.StellrError as e:
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, -1)
@@ -356,22 +340,18 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent_zeromq.core.Poller')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_error_from_solr(self, context, poller):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_error_from_solr(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(context, valid=False)
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
-
-        command = stellr.SelectCommand(TEST_HOST)
+        s, c = self._create_zmq_execution_mocks(pool, valid=False)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
         try:
-            data = command.execute_zmq()
+            data = command.execute()
         except stellr.StellrError as e:
+            pool.assert_called_once_with(TEST_ZMQ)
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, 1)
             self.assertEqual(e.url, '/select?wt=json&fq=field%3Afilter')
@@ -381,20 +361,18 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent.timeout.Timeout')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_timeout(self, context, timeout):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_timeout(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(context)
-        timeout.return_value = MagicMock(spec=gevent.Timeout)
-        socket.recv.return_value = None
+        socket = self._create_zmq_execution_mocks(pool, valid=False,
+            response=None)
 
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
         try:
-            data = command.execute_zmq()
+            data = command.execute()
         except stellr.StellrError as e:
             self.assertTrue(e.timeout)
             self.assertEqual(e.status, -1)
@@ -405,39 +383,35 @@ class StellrCommandTest(unittest.TestCase):
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('gevent_zeromq.core.Poller')
-    @patch('stellr.stellr.context')
-    def test_zmq_execution_general_error(self, context, poller):
+    @patch('stellr.pool.zmq_socket_pool')
+    def test_zmq_execution_general_error(self, pool):
         """
         Test the execution of a select command that is successful.
         """
-        socket = self._create_zmq_execution_mocks(context, side=Exception())
-        poll = Mock()
-        poller.return_value = poll
-        poll.poll.return_value = ({socket: zmq.POLLIN})
+        s, c = self._create_zmq_execution_mocks(pool, valid=False,
+            side=Exception())
 
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_ZMQ)
         command.add_param('fq', 'field:filter')
         try:
-            data = command.execute_zmq()
+            data = command.execute()
         except stellr.StellrError as e:
-            print e.message
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, -1)
-            self.assertEqual(e.url, ('http://localhost:8983/select'
-                                     '?wt=json&fq=field%3Afilter'))
+            self.assertEqual(e.url,
+                TEST_ZMQ + '/select?wt=json&fq=field%3Afilter')
             self.assertEqual(e.body, None)
             self.assertEqual(e.response, None)
             return
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('stellr.stellr.pool')
+    @patch('stellr.stellr.http_pool')
     def test_execution_invalid_response_data(self, pool):
         """
         Test the execution of a command where Solr returns a non-200 response.
         """
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_HTTP)
         self.assertEquals(command.pool, pool)
         response = self._create_execution_mocks(pool, 200, valid=False)
 
@@ -448,19 +422,19 @@ class StellrCommandTest(unittest.TestCase):
             self.assertFalse(e.timeout)
             self.assertEqual(e.status, -1)
             self.assertEqual(e.url,
-                TEST_HOST + '/solr/select?wt=json&fq=field%3Afilter')
+                TEST_HTTP + '/solr/select?wt=json&fq=field%3Afilter')
             self.assertEqual(e.body, None)
             self.assertEqual(e.response, INVALID_RESPONSE_DATA)
             return
 
         self.assertFalse(True, 'Error should have been raised')
 
-    @patch('stellr.stellr.pool')
+    @patch('stellr.stellr.http_pool')
     def test_execution_timeout(self, pool):
         """
         Test the execution of a command where Solr returns a non-200 response.
         """
-        command = stellr.SelectCommand(TEST_HOST)
+        command = stellr.SelectCommand(TEST_HTTP)
         self.assertEquals(command.pool, pool)
         response = self._create_execution_mocks(pool, 500,
             side=urllib3.TimeoutError())
@@ -472,7 +446,7 @@ class StellrCommandTest(unittest.TestCase):
             self.assertTrue(e.timeout)
             self.assertEqual(e.status, -1)
             self.assertEqual(e.url,
-                TEST_HOST + '/solr/select?wt=json&fq=field%3Afilter')
+                TEST_HTTP + '/solr/select?wt=json&fq=field%3Afilter')
             self.assertEqual(e.body, None)
             self.assertEqual(e.response, None)
             return
@@ -491,17 +465,22 @@ class StellrCommandTest(unittest.TestCase):
             pool.urlopen.side_effect = side
         return response
 
-    def _create_zmq_execution_mocks(self, context, side=None, valid=True,
+    def _create_zmq_execution_mocks(self, patch, side=None, valid=True,
                                     response=ZMQ_ERROR_RESPONSE):
         socket = Mock()
-        context.socket.return_value = socket
+        context = Mock()
+        context.__enter__ = Mock()
+        context.__enter__.return_value = socket
+        context.__exit__ = Mock()
+        context.__exit__.return_value = valid
+        patch.return_value = context
         if valid:
             socket.recv.return_value = ZMQ_RESPONSE
         else:
             socket.recv.return_value = response
         if side:
             socket.recv.side_effect = side
-        return socket
+        return socket, context
 
     def _add_query_params(self, command, params):
         for param in params:
